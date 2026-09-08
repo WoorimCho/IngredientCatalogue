@@ -1,0 +1,361 @@
+openapi: 3.1.0
+info:
+  title: Ingredient Catalog API
+  description: >
+    Stores catalog entries and the reusable tags attached to them, and supports
+    searching by tag. One `Ingredient` entry covers what the monolith split into
+    Food and Ingredient — they are unified; any sub-distinction (raw vs
+    processed, etc.) is a tag, not a field. Hand-maintained contract; keep it in
+    step with the controllers under `com.example.ingredientcatelog.Controllers`.
+  version: 0.0.1
+servers:
+  - url: http://localhost:8082
+    description: Local
+
+tags:
+  - name: ingredients
+  - name: tags
+
+paths:
+  /api/ingredients:
+    get:
+      tags: [ingredients]
+      summary: List ingredients, optionally filtered by tag
+      parameters:
+        - name: tag
+          in: query
+          description: Repeatable. Tag names to filter by (case-insensitive).
+          schema: { type: array, items: { type: string } }
+          example: ["diet:vegan", "nut-free"]
+        - name: match
+          in: query
+          description: '`all` (default) requires every tag; `any` requires at least one.'
+          schema: { type: string, enum: [all, any], default: all }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Size' }
+        - { $ref: '#/components/parameters/Sort' }
+      responses:
+        '200':
+          description: A page of ingredients
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PageIngredientResponse' }
+    post:
+      tags: [ingredients]
+      summary: Create an ingredient (tags are get-or-create by name)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IngredientRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngredientResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /api/ingredients/by-ids:
+    get:
+      tags: [ingredients]
+      summary: Batch lookup by id (cross-service resolution; unknown ids omitted)
+      parameters:
+        - name: id
+          in: query
+          required: true
+          description: Repeatable; at most 500.
+          schema: { type: array, items: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: The ingredients that exist, in no particular order
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IngredientResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+
+  /api/ingredients/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    get:
+      tags: [ingredients]
+      summary: Get one ingredient
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngredientResponse' }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [ingredients]
+      summary: Replace an ingredient's name and tag set
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IngredientRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngredientResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [ingredients]
+      summary: Delete an ingredient
+      responses:
+        '204': { description: Deleted }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/ingredients/{id}/tags:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    post:
+      tags: [ingredients]
+      summary: Attach tags (get-or-create by name) to an ingredient
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TagNamesRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngredientResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/ingredients/{id}/tags/{tagName}:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+      - name: tagName
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [ingredients]
+      summary: Detach one tag from an ingredient (the tag itself is kept)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngredientResponse' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/tags:
+    get:
+      tags: [tags]
+      summary: List / autocomplete tags
+      parameters:
+        - name: prefix
+          in: query
+          description: Name starts with this (autocomplete).
+          schema: { type: string }
+        - name: namespace
+          in: query
+          schema: { type: string }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Size' }
+        - { $ref: '#/components/parameters/Sort' }
+      responses:
+        '200':
+          description: A page of tags
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PageTagResponse' }
+    post:
+      tags: [tags]
+      summary: Create a tag explicitly (with namespace / description)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TagRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TagResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /api/tags/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    get:
+      tags: [tags]
+      summary: Get one tag
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TagResponse' }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [tags]
+      summary: Rename a tag / set its namespace or description
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TagRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TagResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [tags]
+      summary: Delete a tag (detaches it from every ingredient first)
+      responses:
+        '204': { description: Deleted }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/tags/merge:
+    post:
+      tags: [tags]
+      summary: Fold one or more tags into another, moving every ingredient link
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MergeRequest' }
+      responses:
+        '200':
+          description: The surviving tag
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TagResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+    Size:
+      name: size
+      in: query
+      schema: { type: integer, minimum: 1, default: 20 }
+    Sort:
+      name: sort
+      in: query
+      description: '`property,(asc|desc)` — e.g. `name,asc`.'
+      schema: { type: string }
+
+  responses:
+    Problem:
+      description: RFC 9457 problem detail
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetail' }
+
+  schemas:
+    IngredientRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 255 }
+        tags:
+          type: array
+          items: { type: string }
+          description: Tag names; created if they don't exist.
+    IngredientResponse:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        tags:
+          type: array
+          items: { $ref: '#/components/schemas/TagResponse' }
+    TagRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 100 }
+        namespace: { type: string, maxLength: 60, nullable: true }
+        description: { type: string, maxLength: 500, nullable: true }
+    TagResponse:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string, description: Normalised to trimmed lower-case. }
+        namespace: { type: string, nullable: true }
+        description: { type: string, nullable: true }
+    TagNamesRequest:
+      type: object
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          minItems: 1
+          items: { type: string }
+    MergeRequest:
+      type: object
+      required: [from, into]
+      properties:
+        from:
+          type: array
+          minItems: 1
+          items: { type: integer, format: int64 }
+        into: { type: integer, format: int64 }
+    ProblemDetail:
+      type: object
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string, format: uri }
+        errors:
+          type: object
+          additionalProperties: { type: string }
+          description: Present on 400 validation failures — field name to message.
+    PageIngredientResponse:
+      allOf:
+        - { $ref: '#/components/schemas/PageEnvelope' }
+        - type: object
+          properties:
+            content:
+              type: array
+              items: { $ref: '#/components/schemas/IngredientResponse' }
+    PageTagResponse:
+      allOf:
+        - { $ref: '#/components/schemas/PageEnvelope' }
+        - type: object
+          properties:
+            content:
+              type: array
+              items: { $ref: '#/components/schemas/TagResponse' }
+    PageEnvelope:
+      type: object
+      description: Spring Data Page serialization (subset).
+      properties:
+        totalElements: { type: integer, format: int64 }
+        totalPages: { type: integer }
+        number: { type: integer }
+        size: { type: integer }
+        first: { type: boolean }
+        last: { type: boolean }
+        numberOfElements: { type: integer }
