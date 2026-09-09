@@ -6,6 +6,24 @@ deleted afterwards. This file covers the **whole system**, like `CHANGES.md`.
 
 ## Remediation log
 
+**2026-09-09 — Phase 5, batch 3 (UI Spring Security — H2 / M1 / M5):**
+- Added `spring-boot-starter-security` to the UI + `config/SecurityConfig`:
+  `anyRequest().permitAll()` (anonymous browsing stays), Spring's form login /
+  basic / logout **disabled** so they don't shadow the UI's own routes.
+- **H2 fixed** — CSRF on: every state-changing form POST needs the `_csrf`
+  token, which Thymeleaf's `th:action` injects as a hidden field automatically
+  (all 20 form templates use `th:action`; the one `fetch()` is a GET). Verified:
+  a forged tokenless `POST /register` → **403**; the real form flow → 302.
+  `JSESSIONID` is now `SameSite=Strict; HttpOnly` and URL rewriting
+  (`;jsessionid=`) is off (`tracking-modes=cookie`).
+- **M5 fixed** — `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+  a Content-Security-Policy (`default-src 'self'`; inline script/style still
+  allowed — nonces are a later pass), `Referrer-Policy: no-referrer`.
+- **M1 fixed** — session-fixation protection (Spring default) plus an explicit
+  `request.changeSessionId()` in `AuthController.login` / `register` (Spring's
+  own auth events don't fire for the UI's home-grown login). Verified: the
+  session id changes on login.
+
 **2026-09-09 — Phase 5, batch 2 (C1 / C2, inter-service auth):**
 - Every internal caller (BFF, UI, recipe-crawler) signs its outbound calls to
   the User service + catalogues with an HMAC header
@@ -42,9 +60,11 @@ deleted afterwards. This file covers the **whole system**, like `CHANGES.md`.
 - **L2 partly fixed** — BFF calculators reject a non-finite `scale` and
   `servings < 1` with **400** (was `NaN`-through / silent clamp).
 
-Still open: **H2 / M1 / M5** (UI Spring Security — CSRF, headers, session
-rotation), **H4** (DB creds → untracked `.env`), **M3 / M4**, the module-local
-`compose.yaml` files (not yet localhost-bound), `/actuator` unprotected.
+Still open: **H4** (DB creds → untracked `.env`; the root `compose.yaml` is no
+longer version-controlled, but per-service `compose.yaml` files still carry
+them), **M3** (register enumeration), **M4** (no rate limiting), the module-local
+`compose.yaml` files (not yet localhost-bound), `/actuator` unprotected, the
+low-severity L1–L7.
 
 **Verdict:** the browser-facing edge (BFF `/bff/**`, Thymeleaf output escaping,
 password handling, DTO boundaries) is genuinely well-built. The problem is the
@@ -105,6 +125,10 @@ exploitable in practice. **Fix:** `'127.0.0.1:8082:8082'` for everything except
 the intended entry point.
 
 ### H2 — CSRF on the UI
+
+> **FIXED 2026-09-09** — spring-boot-starter-security on the UI: CSRF tokens on
+> form posts, SameSite=Strict cookie. See the remediation log (batch 3).
+
 The UI has no Spring Security → no CSRF tokens, no Origin/Referer check, and
 `JSESSIONID` is set with **no `SameSite` attribute**. Demonstrated with a forged
 cross-site `POST` (bogus `Origin`, no token):
@@ -136,11 +160,11 @@ schemas — PII + **BCrypt hashes for offline cracking**. **Fix:** don't publish
 
 | # | Finding | Fix |
 |---|---|---|
-| M1 | **Session fixation (UI)** — `JSESSIONID` not rotated on login; Tomcat also emits `;jsessionid=` URL rewriting. Logout *does* `invalidate()`. | `request.changeSessionId()` after auth; `server.servlet.session.tracking-modes=cookie`. |
+| M1 | **[FIXED 2026-09-09]** ~~Session fixation (UI)~~ — `JSESSIONID` not rotated on login; Tomcat also emits `;jsessionid=` URL rewriting. Logout *does* `invalidate()`. | `request.changeSessionId()` after auth; `server.servlet.session.tracking-modes=cookie`. |
 | M2 | **Username enumeration via login timing** — wrong password for a real user ≈ 377 ms vs unknown user ≈ 73 ms (BCrypt only runs when the user exists). Same 401 + body. | Always verify against a fixed dummy hash. |
 | M3 | **Username/email enumeration via registration** — distinct `"username already taken"` vs `"email already registered"` from the User service. | Generic "check the form" message. |
 | M4 | **No rate limiting** anywhere — `/login`, `/register`, `/authenticate`, CSV import, calculators. | Bucket/filter per IP + per account. |
-| M5 | **UI missing security headers** — no `X-Frame-Options` / `X-Content-Type-Options` / CSP / `Referrer-Policy`; catalogues send none. | Security starter, or a header filter. |
+| M5 | **[FIXED 2026-09-09]** ~~UI missing security headers~~ — no `X-Frame-Options` / `X-Content-Type-Options` / CSP / `Referrer-Policy`; catalogues send none. | Security starter, or a header filter. |
 | M6 | **`sort` param → 500** on the catalogues (`?sort=(select 1)`). *Not* SQLi — Spring Data validates the property before building SQL. It is an unhandled `PropertyReferenceException` = log-spam DoS + a signal. | Map it to 400 in the exception handler. |
 
 ---

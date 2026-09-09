@@ -1313,6 +1313,29 @@ RC **34**, BFF **29**, UI **5**, recipe-crawler **39** — all green.
 
 ---
 
+## Update — 2026-09-09: Phase 5 batch 3 — Spring Security on the UI (H2/M1/M5)
+
+`spring-boot-starter-security` + `config/SecurityConfig` — `permitAll()` (the UI
+keeps its own session/redirect guard), Spring's form login / basic / logout
+disabled so they don't shadow `/login` `/register` `/logout`.
+
+- **H2** — CSRF on. All 20 form templates use `th:action`, so Thymeleaf +
+  Spring's `RequestDataValueProcessor` inject the hidden `_csrf` field
+  automatically — no template edits. The one `fetch()` (portions slider) is a
+  GET. `JSESSIONID` → `SameSite=Strict; HttpOnly`; `tracking-modes=cookie` kills
+  `;jsessionid=` URL rewriting. Verified: tokenless `POST /register` → 403.
+- **M5** — `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, a CSP
+  (`default-src 'self'`; inline script/style still allowed — nonces later),
+  `Referrer-Policy: no-referrer`.
+- **M1** — `AuthController.login` / `register` call `request.changeSessionId()`
+  after auth (Spring's own auth events don't fire for the UI's home-grown
+  login). Verified: session id changes on login.
+
+`PagesRenderTest` gained `@Import(SecurityConfig.class)`; `spring-security-test`
+added. UI tests still **5**.
+
+---
+
 ## Cross-cutting rationale
 
 These principles drove most of the individual edits, so the per-file notes stay short.
