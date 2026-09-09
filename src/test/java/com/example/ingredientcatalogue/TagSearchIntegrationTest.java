@@ -162,6 +162,16 @@ class TagSearchIntegrationTest {
                 .andExpect(status().isCreated());
     }
 
+    @Test
+    void badSortParamIsBadRequestNotServerError() throws Exception {
+        // unknown property -> PropertyReferenceException
+        mvc.perform(get("/api/ingredients?sort=nonsense"))
+                .andExpect(status().isBadRequest());
+        // expression with special chars -> InvalidDataAccessApiUsageException (QueryUtils)
+        mvc.perform(get("/api/ingredients").queryParam("sort", "(select 1)"))
+                .andExpect(status().isBadRequest());
+    }
+
     private long total(String query) throws Exception {
         String body = mvc.perform(get("/api/ingredients" + query))
                 .andExpect(status().isOk())

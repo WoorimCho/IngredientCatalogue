@@ -177,6 +177,27 @@ class OpenApiContractTest {
     }
 
     @Test
+    void updateNutritionReference_matchesContract() throws Exception {
+        String created = mvc.perform(post("/api/nutrition-reference").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"nr-edit-me\",\"kcal\":100}"))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        long id = Long.parseLong(created.replaceAll(".*?\"id\":(\\d+).*", "$1"));
+
+        mvc.perform(put("/api/nutrition-reference/{id}", id).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"nr-edit-me\",\"basisGrams\":100,\"kcal\":250,\"proteinG\":9}"))
+                .andExpect(status().isOk())
+                .andExpect(openApi().isValid(validator))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.kcal").value(250.0));
+
+        mvc.perform(put("/api/nutrition-reference/{id}", 999_999).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"nr-missing\",\"kcal\":1}"))
+                .andExpect(status().isNotFound())
+                .andExpect(openApi().isValid(validator));
+    }
+
+    @Test
     void csvImport_returnsTheDocumentedShape() throws Exception {
         // swagger-request-validator can't reconstruct a multipart body from MockMvc,
         // so the ImportResult response shape is checked directly instead.

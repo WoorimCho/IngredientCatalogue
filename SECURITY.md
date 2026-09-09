@@ -4,6 +4,27 @@ Hands-on assessment against the local Docker stack (all services + infra) on
 **2026-09-08**, plus source review. All test records created during testing were
 deleted afterwards. This file covers the **whole system**, like `CHANGES.md`.
 
+## Remediation log
+
+**2026-09-09 — Phase 5, batch 1 (mechanical):**
+- **H1 fixed** — root `compose.yaml`: every published port bound to `127.0.0.1`
+  except the UI (`8081`). MySQL, the catalogues, the BFF, Zipkin/Prometheus/
+  Grafana are no longer LAN-reachable.
+- **H3 fixed** — Grafana anonymous role `Admin` → `Viewer`; login form
+  re-enabled; admin creds via `GRAFANA_ADMIN_*` (default `admin`/`admin`).
+- **M2 fixed** — `AccountServiceImpl.authenticate` runs one BCrypt check every
+  time (real hash or a dummy) so an unknown user and a wrong password take the
+  same time.
+- **M6 fixed** — `catalogue-common/ApiExceptionHandler` maps
+  `PropertyReferenceException` (bad `?sort=`) to **400**, not 500.
+- **L2 partly fixed** — BFF calculators reject a non-finite `scale` and
+  `servings < 1` with **400** (was `NaN`-through / silent clamp).
+
+Still open: **C1, C2** (inter-service identity), **H2 / M1 / M5** (UI Spring
+Security — CSRF, headers, session rotation), **H4** (DB creds → untracked
+`.env`), **M3 / M4**, the module-local `compose.yaml` files (not yet
+localhost-bound).
+
 **Verdict:** the browser-facing edge (BFF `/bff/**`, Thymeleaf output escaping,
 password handling, DTO boundaries) is genuinely well-built. The problem is the
 **"trust the network" posture applied to services published on `0.0.0.0`** — the

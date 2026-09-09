@@ -1219,6 +1219,58 @@ extraction, context load).
 
 ---
 
+## Update — 2026-09-09: crawl + a non-LLM microdata parser (recipe-crawler)
+
+- **`POST /api/crawl`** `{seeds[], maxPages, maxDepth, sameHostOnly, dryRun}` —
+  BFS from the seeds. `RobotsTxt` (one file per host, honoured for our UA, `*`
+  fallback, `*`/`$` globs, fail-closed on 5xx), `HostRateLimiter` (min gap per
+  host, default 1.5s), `LinkExtractor` (same-host `<a href>`, de-duped,
+  assets/auth dropped). Visited-set + name/creator dedup; `dryRun` writes
+  nothing. UI: `/recipes/crawl`.
+- **`RecipeExtractor`** tries strategies in order, **no LLM**: schema.org
+  JSON-LD, then **HTML microdata** (`MicrodataRecipeParser` — `itemscope
+  itemtype=".../Recipe"` + `itemprop`; nested-scope aware; `<meta content>`;
+  `<ol>/<li>` steps). `ParsedRecipe` + `NoRecipeFoundException` are now
+  top-level. RDFa / free-text (LLM) remain out of scope.
+- recipe-crawler tests **39** (+robots 5, link 3, crawl 5, microdata 3,
+  extractor 3, gateway 4).
+
+## Update — 2026-09-09: nutrition-reference rows are editable
+
+`PUT /api/nutrition-reference/{id}` — replace a row's figures (and optionally
+rename it); 404 if the row is gone, 409 if the new name is taken by another row.
+`NutritionReferenceRequest` gained `applyTo(entity)` / `normalisedName()` so
+create and replace share the field copy. UI: an inline edit form per row on
+`/nutrition-reference` (toggled open; a blank figure clears it). IC tests **30**.
+
+## Update — 2026-09-09: Phase 5 hardening — batch 1
+
+Mechanical fixes from `SECURITY.md` (see its "Remediation log"). No behaviour
+change for legit callers.
+
+- **H1** — root `compose.yaml`: every published port bound to `127.0.0.1`
+  except the UI (`8081`). MySQL / the catalogues / the BFF / Zipkin / Prometheus
+  / Grafana are no longer LAN-reachable; the compose network is unaffected.
+- **H3** — Grafana anonymous role `Admin` → `Viewer`; login form re-enabled;
+  admin creds from `GRAFANA_ADMIN_*` (default `admin`/`admin`).
+- **M2** — `AccountServiceImpl.authenticate` runs one BCrypt verify every call
+  (real hash, or a constructor-built dummy) so an unknown identifier and a
+  wrong password take the same time.
+- **M6** — `catalogue-common/ApiExceptionHandler` maps
+  `PropertyReferenceException` (an unknown `?sort=` property; Spring Data
+  rejects it before SQL, so not injectable) to **400** instead of a 500 +
+  log-spam. Note: the class is `org.springframework.data.core.*` in Spring
+  Data 4, not `...mapping.*`.
+- **L2** — BFF calculators reject a non-finite `scale` and `servings < 1`
+  with **400** (was `NaN` through every field / silent clamp to 1).
+
+Still open (bigger): C1/C2 inter-service identity, H2/M1/M5 (Spring Security on
+the UI), H4 (DB creds → `.env`), M3/M4.
+
+Tests: User **26**, IC **30**, BFF **29**, UI **5**, catalogue-common build green.
+
+---
+
 ## Cross-cutting rationale
 
 These principles drove most of the individual edits, so the per-file notes stay short.

@@ -22,7 +22,11 @@ public record NutritionReferenceRequest(
         @PositiveOrZero Double sodiumMg) {
 
     public NutritionReference toEntity() {
-        NutritionReference r = new NutritionReference();
+        return applyTo(new NutritionReference());
+    }
+
+    /** Copy every field onto {@code r} (used for both create and full replace). */
+    public NutritionReference applyTo(NutritionReference r) {
         r.setName(name.trim().toLowerCase(java.util.Locale.ROOT));
         r.setBasisGrams(basisGrams == null ? 100.0 : basisGrams);
         r.setKcal(kcal);
@@ -33,5 +37,10 @@ public record NutritionReferenceRequest(
         r.setSugarG(sugarG);
         r.setSodiumMg(sodiumMg);
         return r;
+    }
+
+    /** Lower-cased, trimmed name — as stored. */
+    public String normalisedName() {
+        return name.trim().toLowerCase(java.util.Locale.ROOT);
     }
 }
