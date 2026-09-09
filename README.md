@@ -90,5 +90,7 @@ No Spring Security on the classpath — **every write is unauthenticated**. See
 ## Status
 
 **v1 complete** + Phase 4 (nutrition, nutrition-reference incl. `POST`, name
-search, CSV import). `CHANGES.md` in this repo is the running change log for
-**both catalogues**.
+search, CSV import, per-ingredient `densityGPerMl`). Read by the BFF calculators
+and written by `recipe-crawler` (creates ingredients it doesn't recognise on
+import). `CHANGES.md` in this repo is the running change log for **both
+catalogues** (and the cross-cutting BFF / UI / crawler work).
