@@ -1108,6 +1108,42 @@ new context; full `docker compose up` healthy end to end.
 
 ---
 
+## Update — 2026-09-09: timeouts + circuit breakers on the service clients
+
+The BFF and the UI were the two apps with outbound service clients and no
+resilience — a slow or dead downstream would hang a request thread and the
+failure would propagate straight back up. Added, to **both** (the catalogue
+services are leaves — they call nobody):
+
+- **Timeouts** — `spring.http.clients.connect-timeout` / `read-timeout` (the
+  Boot 4.1 *plural* key that feeds the shared `HttpClientSettings`) on the
+  auto-configured `RestClient.Builder`, so they apply to every `*Client` bean.
+  BFF `2s / 5s`, UI `2s / 8s` (one hop further out); both overridable by env.
+- **Circuit breakers** — resilience4j (core + micrometer only, *not*
+  `resilience4j-spring-boot3`, whose auto-config targets Boot 3). One breaker
+  per downstream, wired as a `ClientHttpRequestInterceptor` on each `RestClient`
+  so no client method body changed:
+  - `config/DownstreamResilience` — the `CircuitBreakerRegistry` (COUNT window
+    20, min 10 calls, 50% failure **or** 50% slow-call >3s → OPEN 15s → 4 probe
+    calls) + binds `TaggedCircuitBreakerMetrics` to Micrometer.
+  - `config/CircuitBreakerInterceptor` — a connect/read timeout or a **5xx**
+    counts as a fault; a **4xx** passes through untouched. OPEN → immediate
+    `ResourceAccessException`, which the existing advice already maps to 502
+    (BFF) / a 503 page (UI). The downstream isn't called while OPEN.
+- `CircuitBreakerInterceptor` + `DownstreamResilience` are a per-app copy
+  (~90 LOC) — deliberately **not** shared: it crosses the BFF/UI boundary,
+  which the cutover keeps decoupled.
+- Breaker state is at `/actuator/prometheus` as `resilience4j_circuitbreaker_*`
+  (state, calls, failure rate) — visible in Grafana.
+
+Tests: BFF **26** (+5 `CircuitBreakerInterceptorTest`: success/4xx pass through,
+5xx + timeout count as faults, OPEN rejects without calling downstream), UI
+**5**. Verified in the stack: stop a catalogue → the UI page 503s in ~2s
+(timeout) then instantly (breaker OPEN); restart it → breaker half-opens and
+closes; `resilience4j_circuitbreaker_state` tracks it.
+
+---
+
 ## Cross-cutting rationale
 
 These principles drove most of the individual edits, so the per-file notes stay short.
