@@ -1144,6 +1144,36 @@ closes; `resilience4j_circuitbreaker_state` tracks it.
 
 ---
 
+## Update — 2026-09-09: email is optional on the User service
+
+Nothing is ever sent to a user's email (no verification, no notifications — it's
+all local), so requiring it at registration was pointless friction. Made it
+**optional** rather than removing it (email-or-username login still works for
+accounts that set one):
+
+- `RegisterRequest` / `ProfileUpdateRequest` — dropped `@NotBlank` on `email`;
+  `@Email` stays (it passes `null` and `""`, rejects a malformed address).
+- `Account.email` — column is now nullable; the `uk_account_email` unique index
+  stays (MySQL treats every `NULL` as distinct, so any number of accounts can
+  have no email). New migration `V3__email_optional.sql`
+  (`alter table account modify column email varchar(255) null`).
+- `AccountServiceImpl` — new `normaliseEmail()` turns blank → `null`; the
+  uniqueness checks in `register` / `updateProfile` are skipped when there's no
+  email.
+- `openapi.yaml` — `email` off both `required` lists, marked `nullable: true`
+  (request and `AccountResponse`).
+- **UI** — `required` off the register + profile email inputs (labelled
+  "(optional)"); `@RequestParam(required=false)`; `UserClient` sends `""` for a
+  null email (`Map.of` rejects nulls), which the service normalises away.
+
+Tests: User **26** (+2 — `AccountFlowIntegrationTest.emailIsOptional`,
+`OpenApiContractTest.registerWithoutEmail_matchesContract`), UI **5**. Verified
+in the stack: register with no email → 201 `"email":null`; two no-email accounts
+don't collide; login by username works; a set email is still unique (dupe → 400)
+and still format-checked.
+
+---
+
 ## Cross-cutting rationale
 
 These principles drove most of the individual edits, so the per-file notes stay short.
