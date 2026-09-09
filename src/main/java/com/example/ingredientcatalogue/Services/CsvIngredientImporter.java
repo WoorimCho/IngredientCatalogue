@@ -90,7 +90,11 @@ public class CsvIngredientImporter {
             }
         }
         NutritionDto nutrition = nutrition(row, col);
-        return new IngredientRequest(name.trim(), tags, nutrition);
+        Double density = num(row, col, "density_g_per_ml");
+        if (density == null) {
+            density = num(row, col, "density");
+        }
+        return new IngredientRequest(name.trim(), tags, nutrition, density);
     }
 
     private static NutritionDto nutrition(String[] row, Map<String, Integer> col) {

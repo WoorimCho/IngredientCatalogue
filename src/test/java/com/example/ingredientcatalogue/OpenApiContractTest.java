@@ -138,6 +138,25 @@ class OpenApiContractTest {
     }
 
     @Test
+    void createIngredientWithDensity_matchesContract() throws Exception {
+        String body = mvc.perform(post("/api/ingredients").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"whole milk\",\"densityGPerMl\":1.03}"))
+                .andExpect(status().isCreated())
+                .andExpect(openApi().isValid(validator))
+                .andReturn().getResponse().getContentAsString();
+        long id = Long.parseLong(body.replaceAll(".*?\"id\":(\\d+).*", "$1"));
+
+        // round-trips on the response, and a value update sticks
+        org.assertj.core.api.Assertions.assertThat(body).contains("\"densityGPerMl\":1.03");
+        mvc.perform(put("/api/ingredients/{id}", id).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"whole milk\",\"densityGPerMl\":1.04}"))
+                .andExpect(status().isOk())
+                .andExpect(openApi().isValid(validator))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.densityGPerMl").value(1.04));
+    }
+
+    @Test
     void setNutrition_matchesContract() throws Exception {
         String body = mvc.perform(post("/api/ingredients").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"butter\"}"))

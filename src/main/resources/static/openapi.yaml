@@ -371,6 +371,11 @@ components:
         nutrition:
           $ref: '#/components/schemas/Nutrition'
           # Optional. Omit the key to leave existing nutrition untouched on update.
+        densityGPerMl:
+          type: number
+          exclusiveMinimum: 0
+          nullable: true
+          description: Grams per millilitre, for volume<->mass in the recipe calculators. Omit to leave untouched on update.
     IngredientResponse:
       type: object
       properties:
@@ -382,6 +387,10 @@ components:
         nutrition:
           $ref: '#/components/schemas/Nutrition'
           # Present only when the ingredient has data; the field is omitted otherwise.
+        densityGPerMl:
+          type: number
+          nullable: true
+          description: Grams per millilitre. Present only when set.
     Nutrition:
       type: object
       description: Nutrition facts, per basisGrams grams (default 100). Every figure optional.

@@ -1174,6 +1174,51 @@ and still format-checked.
 
 ---
 
+## Update — 2026-09-09: recipe unit switching, portion slider, recipe-crawler
+
+Three things, from one request.
+
+### Ingredient density (IngredientCatalogue)
+
+New nullable `density_g_per_ml` column on `ingredient` (migration `V4`), on the
+`IngredientRequest` / `IngredientResponse` DTOs (omitted from responses when
+absent, `null` on update = leave as-is — same rule as `nutrition`), on the CSV
+importer (`density` / `density_g_per_ml` column), and on the UI ingredient
+form + detail page. This is what lets the calculators cross the volume↔mass line.
+
+### Calculator: volume ⇄ mass + a portion slider (BFF + UI)
+
+- `Units.toGrams(amount, unit, density)` — VOLUME units now convert to grams
+  when a density is available; `CommonDensities` is a ~30-entry fallback table
+  (flour, sugar, milk, oil, honey, …) matched by name, used only when the
+  ingredient carries no density of its own. So a `1 cup milk` line is now
+  **counted** in nutrition instead of skipped.
+- Every calculator line gained `millilitres` / `scaledGrams` +
+  `scaledMillilitres` — the volume↔mass equivalent, so the UI can show an amount
+  three ways.
+- Nutrition page: a "Volume" column next to "Weight".
+- Portions page: a **live slider** (0.25×–4×) + an exact-multiplier box, backed
+  by a new `GET /recipes/{id}/portions.json` on the UI; a toggle switches the
+  scaled column between *as written* / *grams* / *millilitres*. The anchor-line
+  form ("I want this much of X") is kept below.
+
+### recipe-crawler (new service, port 8086)
+
+`Projects/recipe-crawler/` — a stateless importer in front of the two catalogue
+services. `POST /api/import/preview` fetches a URL, parses its schema.org /
+JSON-LD `Recipe`, parses each "2 cups flour" line into amount + unit + name, and
+matches the names against IngredientCatalogue (no writes). `POST /api/import/commit`
+does the same, then creates any missing ingredients and the recipe (tagged
+`source:imported`). New UI page `/recipes/import-url` (preview → import). Own
+Dockerfile + compose service; per-target circuit breakers mirroring the BFF.
+Link-following / seed crawling is **not** built — one URL at a time for now.
+
+Tests: IngredientCatalogue **29** (+1 density contract), BFF **28** (+2 density
+in the calculator), UI **5**, recipe-crawler **16** (line parsing, JSON-LD
+extraction, context load).
+
+---
+
 ## Cross-cutting rationale
 
 These principles drove most of the individual edits, so the per-file notes stay short.

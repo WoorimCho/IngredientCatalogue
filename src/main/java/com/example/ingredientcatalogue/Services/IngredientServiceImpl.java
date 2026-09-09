@@ -92,6 +92,7 @@ public class IngredientServiceImpl implements IngredientService {
         if (request.nutrition() != null) {
             ingredient.setNutrition(request.nutrition().toEntity());
         }
+        ingredient.setDensityGPerMl(request.densityGPerMl());
         return IngredientResponse.from(ingredientRepository.save(ingredient));
     }
 
@@ -103,6 +104,10 @@ public class IngredientServiceImpl implements IngredientService {
         // null nutrition on update = leave as-is; use setNutrition(...) to change it.
         if (request.nutrition() != null) {
             ingredient.setNutrition(request.nutrition().toEntity());
+        }
+        // same convention for density: null = leave as-is.
+        if (request.densityGPerMl() != null) {
+            ingredient.setDensityGPerMl(request.densityGPerMl());
         }
         return IngredientResponse.from(ingredientRepository.save(ingredient));
     }

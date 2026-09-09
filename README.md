@@ -19,7 +19,9 @@ plus the shared **tag** vocabulary and a static **nutrition reference**.
 
 - **`Ingredient`** — `id`, `name` (unique-ish), `Set<Tag>`, embedded
   **`Nutrition`** (`basisGrams` default 100 + `kcal, proteinG, carbsG, fatG,
-  fiberG, sugarG, sodiumMg`, all nullable).
+  fiberG, sugarG, sodiumMg`, all nullable), and an optional `densityGPerMl`
+  (grams per millilitre — lets the recipe calculators convert a volume amount
+  to mass and back).
 - **`Tag`** — reusable label, name normalised to lower-case, optional
   `namespace` (free-text grouping only — *not* parsed from a `prefix:` in the
   name) + `description`. Shared by both catalogues (each has its own copy).
@@ -34,7 +36,7 @@ plus the shared **tag** vocabulary and a static **nutrition reference**.
 | `GET /` | `?name=` (substring), `?tag=` (repeatable) + `?match=all\|any`, paged |
 | `GET /{id}` | one |
 | `GET /by-ids?id=1&id=2` | batch resolve (cross-service; unknown ids omitted) |
-| `POST /` | create (`name`, `tags[]`, optional `nutrition`) |
+| `POST /` | create (`name`, `tags[]`, optional `nutrition`, optional `densityGPerMl`) |
 | `PUT /{id}` | replace |
 | `PUT /{id}/nutrition` | set/replace (empty body clears) |
 | `DELETE /{id}` | delete |
@@ -71,7 +73,7 @@ docker compose up -d mysql
 | `ZIPKIN_ENDPOINT` | `http://localhost:9411/api/v2/spans` |
 
 Flyway migrations: `V1` schema + tags, `V2` nutrition columns + reference table,
-`V3` seed 44 foods. `ddl-auto=validate`.
+`V3` seed 44 foods, `V4` `density_g_per_ml` column. `ddl-auto=validate`.
 
 ## Tests
 

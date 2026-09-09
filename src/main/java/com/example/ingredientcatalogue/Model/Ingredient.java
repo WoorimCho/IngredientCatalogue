@@ -63,6 +63,16 @@ public class Ingredient {
     @Embedded
     private Nutrition nutrition;
 
+    /**
+     * Grams per millilitre — lets the recipe calculators convert a volume amount
+     * (cups, tbsp) to mass and back. Optional; unknown until set. Rough guide:
+     * water 1.0, milk 1.03, oil 0.92, honey 1.42, all-purpose flour ~0.53,
+     * granulated sugar ~0.85.
+     */
+    @Setter
+    @Column(name = "density_g_per_ml")
+    private Double densityGPerMl;
+
     protected Ingredient() {
         // for JPA
     }

@@ -7,9 +7,13 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.Comparator;
 import java.util.List;
 
-/** {@code nutrition} is omitted entirely when the ingredient has no data (never serialized as {@code null}). */
+/**
+ * {@code nutrition} and {@code densityGPerMl} are omitted entirely when the
+ * ingredient has no such data (never serialized as {@code null}).
+ */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record IngredientResponse(Long id, String name, List<TagResponse> tags, NutritionDto nutrition) {
+public record IngredientResponse(Long id, String name, List<TagResponse> tags,
+                                 NutritionDto nutrition, Double densityGPerMl) {
 
     public static IngredientResponse from(Ingredient ingredient) {
         List<TagResponse> tags = ingredient.getTags().stream()
@@ -18,6 +22,7 @@ public record IngredientResponse(Long id, String name, List<TagResponse> tags, N
                 .toList();
         return new IngredientResponse(
                 ingredient.getId(), ingredient.getName(), tags,
-                NutritionDto.from(ingredient.getNutrition()));
+                NutritionDto.from(ingredient.getNutrition()),
+                ingredient.getDensityGPerMl());
     }
 }
