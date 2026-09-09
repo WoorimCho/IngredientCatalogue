@@ -1271,6 +1271,48 @@ Tests: User **26**, IC **30**, BFF **29**, UI **5**, catalogue-common build gree
 
 ---
 
+## Update — 2026-09-09: Phase 5 batch 2 — inter-service HMAC auth (C1/C2)
+
+The User service and both catalogues trusted anything on the network. Now every
+internal caller signs its outbound calls.
+
+- **`internal/InternalAuth`** (a per-service copy — it crosses the BFF/UI
+  boundary the cutover keeps decoupled): builds / verifies
+  `X-Internal-Auth: t=<epochMillis>,u=<actingUser|->,s=<hex HMAC-SHA256(secret,
+  "<METHOD>\n<path>\n<u>\n<t>")>`. 5-minute skew window, constant-time compare.
+- **Inbound**
+  - `catalogue-common/InternalAuthFilter` (both catalogues) — a write
+    (`POST/PUT/DELETE/PATCH`) under `/api/**` without a valid header → **403**;
+    reads stay open (C2).
+  - `User/UserInternalAuthFilter` — *every* `/api/**` call needs the header, and
+    for `/api/accounts/{id}` (+ children) the acting user must equal `{id}` →
+    **403** (C1). `POST /api/accounts`, `POST /api/authenticate`,
+    `/api/restrictions` need the header but no id match.
+  - `recipe-crawler/InternalAuthFilter` — all `/api/**` need it (import + crawl
+    trigger outbound fetches and catalogue writes).
+  - Plain servlet filters (`@Component`, `OncePerRequestFilter`); no Spring
+    Security added. `internal-auth.enabled=false` turns them off (tests do, via
+    `@TestPropertySource`; the HMAC itself has its own unit test).
+- **Outbound** — a `ClientHttpRequestInterceptor` on each RestClient that talks
+  to a guarded service:
+  - BFF: acting user = the request's `BffPrincipal` (`SecurityContextHolder`).
+  - UI: acting user = the session's `CurrentUser`, carried on an `ActingUser`
+    ThreadLocal set by `ActingUserFilter`.
+  - crawler: never acts for a user (`u=-`).
+  - Not on the UI→BFF client — `/bff/**` is session-cookie auth.
+- `INTERNAL_AUTH_SECRET` env on all six services in `compose.yaml`; default
+  `dev-internal-secret-change-me` in each `application.properties`.
+
+Verified in the stack: register / login / browse / create an ingredient / edit
+own profile / composed recipe / URL import all still work; raw
+`GET|DELETE :8084/api/accounts/1` and `POST :8082/api/ingredients` → **403**;
+catalogue `GET`s still 200.
+
+Tests: catalogue-common **+5** (`InternalAuthTest`), User **26**, IC **31**,
+RC **34**, BFF **29**, UI **5**, recipe-crawler **39** — all green.
+
+---
+
 ## Cross-cutting rationale
 
 These principles drove most of the individual edits, so the per-file notes stay short.

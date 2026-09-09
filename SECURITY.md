@@ -6,6 +6,28 @@ deleted afterwards. This file covers the **whole system**, like `CHANGES.md`.
 
 ## Remediation log
 
+**2026-09-09 — Phase 5, batch 2 (C1 / C2, inter-service auth):**
+- Every internal caller (BFF, UI, recipe-crawler) signs its outbound calls to
+  the User service + catalogues with an HMAC header
+  `X-Internal-Auth: t=<ms>,u=<actingUser|->,s=<HMAC-SHA256(secret, METHOD\npath\nu\nt)>`
+  (`internal/InternalAuth`, a per-service copy; 5-minute replay window;
+  constant-time compare).
+- **C1 fixed** — `User/UserInternalAuthFilter`: every `/api/**` call needs a
+  valid header, and for `/api/accounts/{id}` (+ everything under it) the acting
+  user must equal `{id}` → **403** otherwise. `POST /api/accounts`,
+  `POST /api/authenticate`, `/api/restrictions` need the header but no
+  acting-user match. Verified: raw `GET/DELETE /api/accounts/1` → 403.
+- **C2 fixed** — `catalogue-common/InternalAuthFilter` (both catalogues) +
+  `recipe-crawler/InternalAuthFilter`: a write (`POST/PUT/DELETE/PATCH`) under
+  `/api/**` needs a valid header → **403** otherwise. Reads stay open (intended).
+- The acting user is the BFF's `BffPrincipal` (from `SecurityContextHolder`) or,
+  in the UI, the session's `CurrentUser` (via `ActingUser` ThreadLocal +
+  `ActingUserFilter`). `INTERNAL_AUTH_SECRET` env, shared; `internal-auth.enabled`
+  toggles the filters (tests set it false).
+- Verified end-to-end in the stack: register / login / browse / create an
+  ingredient / edit own profile / composed recipe / URL import all still work;
+  every unauthenticated direct call to a guarded endpoint is 403.
+
 **2026-09-09 — Phase 5, batch 1 (mechanical):**
 - **H1 fixed** — root `compose.yaml`: every published port bound to `127.0.0.1`
   except the UI (`8081`). MySQL, the catalogues, the BFF, Zipkin/Prometheus/
@@ -20,10 +42,9 @@ deleted afterwards. This file covers the **whole system**, like `CHANGES.md`.
 - **L2 partly fixed** — BFF calculators reject a non-finite `scale` and
   `servings < 1` with **400** (was `NaN`-through / silent clamp).
 
-Still open: **C1, C2** (inter-service identity), **H2 / M1 / M5** (UI Spring
-Security — CSRF, headers, session rotation), **H4** (DB creds → untracked
-`.env`), **M3 / M4**, the module-local `compose.yaml` files (not yet
-localhost-bound).
+Still open: **H2 / M1 / M5** (UI Spring Security — CSRF, headers, session
+rotation), **H4** (DB creds → untracked `.env`), **M3 / M4**, the module-local
+`compose.yaml` files (not yet localhost-bound), `/actuator` unprotected.
 
 **Verdict:** the browser-facing edge (BFF `/bff/**`, Thymeleaf output escaping,
 password handling, DTO boundaries) is genuinely well-built. The problem is the
@@ -37,6 +58,10 @@ hardening; nothing exotic.
 ## 🔴 Critical
 
 ### C1 — User service: no auth on any endpoint
+
+> **FIXED 2026-09-09** — UserInternalAuthFilter: HMAC header required on every
+> /api/**, acting user must match {id}. See the remediation log.
+
 `User/SecurityConfig` is `anyRequest().permitAll()`. Account IDs are sequential.
 Demonstrated unauthenticated against `:8084`:
 
@@ -56,6 +81,11 @@ identity (signed header / JWT) and have the User service enforce
 `caller == {id}`. Interim: bind `:8084` to `127.0.0.1` and firewall it.
 
 ### C2 — IngredientCatalogue & RecipeCatalogue: no security at all
+
+> **FIXED 2026-09-09** — InternalAuthFilter: a valid HMAC `X-Internal-Auth`
+> header is required on writes under `/api/**`. Reads stay open. See the
+> remediation log.
+
 No `spring-security` on the classpath; every `POST`/`PUT`/`DELETE` on
 `/api/ingredients`, `/api/recipes`, `/api/tags`, `/api/nutrition-reference` is
 open. Demonstrated create + delete of ingredients / recipes / tags
