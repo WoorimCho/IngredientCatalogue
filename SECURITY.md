@@ -1,0 +1,161 @@
+# Security assessment — Allergen Information System
+
+Hands-on assessment against the local Docker stack (all services + infra) on
+**2026-09-08**, plus source review. All test records created during testing were
+deleted afterwards. This file covers the **whole system**, like `CHANGES.md`.
+
+**Verdict:** the browser-facing edge (BFF `/bff/**`, Thymeleaf output escaping,
+password handling, DTO boundaries) is genuinely well-built. The problem is the
+**"trust the network" posture applied to services published on `0.0.0.0`** — the
+User service and both catalogues have effectively no authentication, so anyone who
+can reach the ports owns the data. Everything here is access-control and
+hardening; nothing exotic.
+
+---
+
+## 🔴 Critical
+
+### C1 — User service: no auth on any endpoint
+`User/SecurityConfig` is `anyRequest().permitAll()`. Account IDs are sequential.
+Demonstrated unauthenticated against `:8084`:
+
+| Action | Result |
+|---|---|
+| `GET /api/accounts/1` | full PII (username, email, displayName, timestamps, restrictions, favourites) |
+| `PUT /api/accounts/1` `{"email":"attacker@evil.com"}` | 200 — email / display-name **takeover primitive** |
+| `PUT /api/accounts/302/restrictions` | 200 — overwrote another user's **dietary-safety data** |
+| `DELETE /api/accounts/402` | 204 — **delete any account** |
+| `POST /api/accounts/1/favorites/recipes/353` | 200 |
+
+`currentPassword` **is** verified on password change (401 on wrong) — that
+control holds.
+
+**Fix:** the BFF already authenticates the end user — forward a verified
+identity (signed header / JWT) and have the User service enforce
+`caller == {id}`. Interim: bind `:8084` to `127.0.0.1` and firewall it.
+
+### C2 — IngredientCatalogue & RecipeCatalogue: no security at all
+No `spring-security` on the classpath; every `POST`/`PUT`/`DELETE` on
+`/api/ingredients`, `/api/recipes`, `/api/tags`, `/api/nutrition-reference` is
+open. Demonstrated create + delete of ingredients / recipes / tags
+unauthenticated. Anyone on the network can wipe or poison the catalogues.
+
+**Fix:** shared filter requiring a BFF-forwarded identity for writes; reads may
+stay open if intended.
+
+---
+
+## 🟠 High
+
+### H1 — Every port published to `0.0.0.0`
+`compose.yaml` uses `'8082:8082'` etc., so all ten services (incl. MySQL
+`3306`) are LAN-reachable, not localhost-only. This is what makes C1/C2
+exploitable in practice. **Fix:** `'127.0.0.1:8082:8082'` for everything except
+the intended entry point.
+
+### H2 — CSRF on the UI
+The UI has no Spring Security → no CSRF tokens, no Origin/Referer check, and
+`JSESSIONID` is set with **no `SameSite` attribute**. Demonstrated with a forged
+cross-site `POST` (bogus `Origin`, no token):
+- `POST /account/restrictions` → replaced the victim's restrictions with `["csrf-injected"]`
+- `POST /favourites/recipes/1`, `POST /settings/theme` → succeeded
+
+Modern browsers' default `SameSite=Lax` blunts this for top-level POSTs, but
+there is zero defense-in-depth and the impact touches **safety data**. **Fix:**
+add `spring-boot-starter-security` to the UI (CSRF on by default for form
+posts), or a `SameSite=Strict` + Origin-check filter.
+
+### H3 — Grafana = anonymous Admin
+`GF_AUTH_ANONYMOUS_ORG_ROLE=Admin`. Unauthenticated on `:3000`:
+`GET /api/datasources` leaks internal topology; `/api/datasources/proxy/1/...`
+proxies arbitrary queries through Grafana; `POST /api/serviceaccounts
+{"role":"Admin"}` returned **201** (created + deleted during the test) →
+persistent admin foothold. **Fix:** anonymous → `Viewer` or off; bind `:3000`
+to localhost.
+
+### H4 — MySQL exposed with weak, in-repo credentials
+`:3306` open; `root`/`verysecret`, `myuser`/`secret` are hard-coded in committed
+`compose.yaml` files. `mysql -uroot -pverysecret` from the host dumps all three
+schemas — PII + **BCrypt hashes for offline cracking**. **Fix:** don't publish
+3306; move creds to an untracked `.env`; use non-trivial values.
+
+---
+
+## 🟡 Medium
+
+| # | Finding | Fix |
+|---|---|---|
+| M1 | **Session fixation (UI)** — `JSESSIONID` not rotated on login; Tomcat also emits `;jsessionid=` URL rewriting. Logout *does* `invalidate()`. | `request.changeSessionId()` after auth; `server.servlet.session.tracking-modes=cookie`. |
+| M2 | **Username enumeration via login timing** — wrong password for a real user ≈ 377 ms vs unknown user ≈ 73 ms (BCrypt only runs when the user exists). Same 401 + body. | Always verify against a fixed dummy hash. |
+| M3 | **Username/email enumeration via registration** — distinct `"username already taken"` vs `"email already registered"` from the User service. | Generic "check the form" message. |
+| M4 | **No rate limiting** anywhere — `/login`, `/register`, `/authenticate`, CSV import, calculators. | Bucket/filter per IP + per account. |
+| M5 | **UI missing security headers** — no `X-Frame-Options` / `X-Content-Type-Options` / CSP / `Referrer-Policy`; catalogues send none. | Security starter, or a header filter. |
+| M6 | **`sort` param → 500** on the catalogues (`?sort=(select 1)`). *Not* SQLi — Spring Data validates the property before building SQL. It is an unhandled `PropertyReferenceException` = log-spam DoS + a signal. | Map it to 400 in the exception handler. |
+
+---
+
+## 🟢 Low / informational
+
+- **L1 CSV formula injection** — import stores `=`/`@`/`+`/`-`-prefixed values
+  verbatim. Inert today (no CSV *export*); prefix with `'` if an export is added.
+- **L2 Calculator robustness** — `portions?scale=NaN` → 200 with `NaN` in every
+  field; `nutrition?servings=-5` → 200 (silently clamped to 1). Should be 400.
+- **L3** `/actuator/info` leaks artifact name + version + build time.
+  `/actuator/health` is correctly terse (`show-details=when-authorized`).
+- **L4** `openapi.yaml` served publicly on the catalogues — intended, but a full
+  API map for an attacker.
+- **L5** Zipkin (`:9411`) and Prometheus (`:9412`) unauthenticated — trace /
+  metric exposure. Prometheus admin API is off (good).
+- **L6** Open-redirect guard on `?next=` allows protocol-relative `//host`;
+  Spring normalised it safely here — still tighten to reject `//` and `\`.
+- **L7** `spring.thymeleaf.cache=false` ships in the UI prod image;
+  `AuthInterceptor` creates a session for every anonymous hit.
+
+---
+
+## Prompt-injection / AI-targeted content
+
+**No LLM in the app today → no live prompt-injection sink.** Stored payloads
+(`IGNORE ALL PREVIOUS INSTRUCTIONS… </system>`, tag `<|im_start|>system`) were
+checked: returned as inert data in API JSON, **not** echoed to container logs,
+**not** present in Zipkin span names/tags.
+
+This is a **design constraint for Phase 4's RAG / webcrawler**, not a bug now:
+recipe steps, ingredient names, and tags are fully attacker-controlled free text
+(C2). Anything that later feeds them to an LLM must treat them as untrusted —
+delimit clearly, never concatenate into the system/instruction context, don't
+act on instructions found in stored content. The webcrawler has the same issue
+for fetched page text.
+
+---
+
+## What is already solid (don't regress)
+
+- **BFF `/bff/**`** — `accountId` from the session, ignores `?accountId=`;
+  `/bff/accounts/{id}/favorite-recipes` has an explicit ownership check (403
+  for another account).
+- **Stored XSS: not exploitable** — Thymeleaf `th:text` escaping holds across
+  list / detail / chips / steps / `<title>` and the error page's reflected
+  `detail`; no `th:utext` on user data.
+- **Passwords** — BCrypt via `DelegatingPasswordEncoder`; `currentPassword`
+  enforced on change.
+- **Mass assignment: not vulnerable** — smuggled `id` / `role` / `restrictions`
+  on register are ignored.
+- **SQLi: not found** — derived queries + Specifications use bound parameters;
+  the `name` LIKE filter is safe (boolean-differential negative).
+- **Multipart** — 5 MB cap (413); the importer parses in memory and never
+  writes to disk, so a `../../etc/passwd` filename is inert. Containers run as
+  non-root; `ddl-auto=validate`.
+
+---
+
+## Priority order
+
+1. Bind all ports to `127.0.0.1` except the entry point (**H1** — one line,
+   removes most exposure).
+2. Inter-service auth: BFF forwards a verified identity; User service + catalogues
+   enforce it (**C1, C2**).
+3. `spring-boot-starter-security` on the UI for CSRF + headers; `SameSite` on
+   the session cookie; rotate the session on login (**H2, M1, M5**).
+4. Grafana anonymous → Viewer/off; DB creds out of tracked files (**H3, H4**).
+5. Dummy-hash on unknown user; `PropertyReferenceException` → 400 (**M2, M6**).

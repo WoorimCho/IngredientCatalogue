@@ -2,12 +2,12 @@ services:
   mysql:
     image: 'mysql:8.4'
     environment:
-      - 'MYSQL_DATABASE=ingredient_catalog'
+      - 'MYSQL_DATABASE=ingredient_catalogue'
       - 'MYSQL_PASSWORD=secret'
       - 'MYSQL_ROOT_PASSWORD=verysecret'
       - 'MYSQL_USER=myuser'
     ports:
-      # Host 3307 so the monolith (3306) and RecipeCatelog (3308) can run alongside.
+      # Host 3307 so the monolith (3306) and RecipeCatalogue (3308) can run alongside.
       - '3307:3306'
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pverysecret"]
@@ -23,9 +23,11 @@ services:
   app:
     profiles: ["full"]
     build:
-      context: .
+      # Parent dir: the Gradle build is a composite that includes ../catalogue-common.
+      context: ..
+      dockerfile: IngredientCatalogue/Dockerfile
     environment:
-      - 'SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/ingredient_catalog?allowPublicKeyRetrieval=true&useSSL=false'
+      - 'SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/ingredient_catalogue?allowPublicKeyRetrieval=true&useSSL=false'
       - 'SPRING_DATASOURCE_USERNAME=myuser'
       - 'SPRING_DATASOURCE_PASSWORD=secret'
     ports:

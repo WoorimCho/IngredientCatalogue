@@ -1,12 +1,12 @@
-openapi: 3.1.0
+openapi: 3.0.3
 info:
-  title: Ingredient Catalog API
+  title: Ingredient Catalogue API
   description: >
-    Stores catalog entries and the reusable tags attached to them, and supports
+    Stores catalogue entries and the reusable tags attached to them, and supports
     searching by tag. One `Ingredient` entry covers what the monolith split into
     Food and Ingredient — they are unified; any sub-distinction (raw vs
     processed, etc.) is a tag, not a field. Hand-maintained contract; keep it in
-    step with the controllers under `com.example.ingredientcatelog.Controllers`.
+    step with the controllers under `com.example.ingredientcatalogue.Controllers`.
   version: 0.0.1
 servers:
   - url: http://localhost:8082
@@ -15,13 +15,19 @@ servers:
 tags:
   - name: ingredients
   - name: tags
+  - name: nutrition
 
 paths:
   /api/ingredients:
     get:
       tags: [ingredients]
-      summary: List ingredients, optionally filtered by tag
+      summary: List ingredients, optionally filtered by name fragment and/or tag
       parameters:
+        - name: name
+          in: query
+          description: Case-insensitive substring of the ingredient name (autocomplete).
+          schema: { type: string }
+          example: oat
         - name: tag
           in: query
           description: Repeatable. Tag names to filter by (case-insensitive).
@@ -150,6 +156,87 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/IngredientResponse' }
         '404': { $ref: '#/components/responses/Problem' }
+
+  /api/ingredients/{id}/nutrition:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    put:
+      tags: [ingredients]
+      summary: Replace an ingredient's nutrition facts (empty body clears them)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Nutrition' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngredientResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/ingredients/import:
+    post:
+      tags: [ingredients]
+      summary: Bulk-create ingredients from a CSV upload
+      description: >
+        `multipart/form-data`, part `file`. Header row required; columns
+        (case-insensitive, any order): `name` (required), `tags`
+        (`;`-separated), and any of
+        `basisGrams,kcal,proteinG,carbsG,fatG,fiberG,sugarG,sodiumMg`.
+        Always 200 — per-row problems are in the body.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: Import report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+
+  /api/nutrition-reference:
+    get:
+      tags: [nutrition]
+      summary: The nutrition reference (common foods, per basisGrams grams)
+      parameters:
+        - name: name
+          in: query
+          description: Case-insensitive substring of the food name.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Matching reference rows, ordered by name
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/NutritionReferenceResponse' }
+    post:
+      tags: [nutrition]
+      summary: Add a nutrition reference row
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NutritionReferenceRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NutritionReferenceResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
 
   /api/tags:
     get:
@@ -281,6 +368,9 @@ components:
           type: array
           items: { type: string }
           description: Tag names; created if they don't exist.
+        nutrition:
+          $ref: '#/components/schemas/Nutrition'
+          # Optional. Omit the key to leave existing nutrition untouched on update.
     IngredientResponse:
       type: object
       properties:
@@ -289,6 +379,60 @@ components:
         tags:
           type: array
           items: { $ref: '#/components/schemas/TagResponse' }
+        nutrition:
+          $ref: '#/components/schemas/Nutrition'
+          # Present only when the ingredient has data; the field is omitted otherwise.
+    Nutrition:
+      type: object
+      description: Nutrition facts, per basisGrams grams (default 100). Every figure optional.
+      properties:
+        basisGrams: { type: number, minimum: 0, description: 'Reference amount in grams (default 100).' }
+        kcal:       { type: number, minimum: 0 }
+        proteinG:   { type: number, minimum: 0 }
+        carbsG:     { type: number, minimum: 0 }
+        fatG:       { type: number, minimum: 0 }
+        fiberG:     { type: number, minimum: 0 }
+        sugarG:     { type: number, minimum: 0 }
+        sodiumMg:   { type: number, minimum: 0 }
+    ImportResult:
+      type: object
+      properties:
+        rows:     { type: integer, description: Data rows seen (header excluded). }
+        imported: { type: integer }
+        skipped:  { type: integer }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              line:    { type: integer, format: int64, description: 1-based line number in the file. }
+              message: { type: string }
+    NutritionReferenceResponse:
+      type: object
+      properties:
+        id:         { type: integer, format: int64 }
+        name:       { type: string }
+        basisGrams: { type: number }
+        kcal:       { type: number, nullable: true }
+        proteinG:   { type: number, nullable: true }
+        carbsG:     { type: number, nullable: true }
+        fatG:       { type: number, nullable: true }
+        fiberG:     { type: number, nullable: true }
+        sugarG:     { type: number, nullable: true }
+        sodiumMg:   { type: number, nullable: true }
+    NutritionReferenceRequest:
+      type: object
+      required: [name]
+      properties:
+        name:       { type: string, maxLength: 200 }
+        basisGrams: { type: number, minimum: 0, nullable: true, description: Defaults to 100 when omitted. }
+        kcal:       { type: number, minimum: 0, nullable: true }
+        proteinG:   { type: number, minimum: 0, nullable: true }
+        carbsG:     { type: number, minimum: 0, nullable: true }
+        fatG:       { type: number, minimum: 0, nullable: true }
+        fiberG:     { type: number, minimum: 0, nullable: true }
+        sugarG:     { type: number, minimum: 0, nullable: true }
+        sodiumMg:   { type: number, minimum: 0, nullable: true }
     TagRequest:
       type: object
       required: [name]
@@ -332,30 +476,36 @@ components:
           type: object
           additionalProperties: { type: string }
           description: Present on 400 validation failures — field name to message.
+    # Stable page envelope (`PageResponse<T>`) — hand-controlled, not Spring
+    # Data's internal `Page` serialization. Flattened (not `allOf` composed) so
+    # strict validators don't treat each branch as a closed object.
     PageIngredientResponse:
-      allOf:
-        - { $ref: '#/components/schemas/PageEnvelope' }
-        - type: object
-          properties:
-            content:
-              type: array
-              items: { $ref: '#/components/schemas/IngredientResponse' }
-    PageTagResponse:
-      allOf:
-        - { $ref: '#/components/schemas/PageEnvelope' }
-        - type: object
-          properties:
-            content:
-              type: array
-              items: { $ref: '#/components/schemas/TagResponse' }
-    PageEnvelope:
       type: object
-      description: Spring Data Page serialization (subset).
+      required: [content, page, size, totalElements, totalPages, first, last, numberOfElements, empty]
       properties:
+        content:
+          type: array
+          items: { $ref: '#/components/schemas/IngredientResponse' }
+        page: { type: integer, description: Zero-based index of this page. }
+        size: { type: integer, description: Requested page size. }
         totalElements: { type: integer, format: int64 }
         totalPages: { type: integer }
-        number: { type: integer }
-        size: { type: integer }
         first: { type: boolean }
         last: { type: boolean }
-        numberOfElements: { type: integer }
+        numberOfElements: { type: integer, description: Items actually on this page. }
+        empty: { type: boolean }
+    PageTagResponse:
+      type: object
+      required: [content, page, size, totalElements, totalPages, first, last, numberOfElements, empty]
+      properties:
+        content:
+          type: array
+          items: { $ref: '#/components/schemas/TagResponse' }
+        page: { type: integer, description: Zero-based index of this page. }
+        size: { type: integer, description: Requested page size. }
+        totalElements: { type: integer, format: int64 }
+        totalPages: { type: integer }
+        first: { type: boolean }
+        last: { type: boolean }
+        numberOfElements: { type: integer, description: Items actually on this page. }
+        empty: { type: boolean }
