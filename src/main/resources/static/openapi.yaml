@@ -222,9 +222,16 @@ paths:
           in: query
           description: Case-insensitive substring of the food name.
           schema: { type: string }
+        - name: sort
+          in: query
+          description: >-
+            `property,(asc|desc)` — default `name,asc`. Sortable: `name`, `kcal`,
+            `proteinG`, `carbsG`, `fatG`, `fiberG`, `sugarG`, `sodiumMg`,
+            `basisGrams`. Rows with no value for the figure sort last.
+          schema: { type: string }
       responses:
         '200':
-          description: Matching reference rows, ordered by name
+          description: Matching reference rows
           content:
             application/json:
               schema:
@@ -384,7 +391,11 @@ components:
     Sort:
       name: sort
       in: query
-      description: '`property,(asc|desc)` — e.g. `name,asc`.'
+      description: >-
+        `property,(asc|desc)` — e.g. `name,asc`. Ingredients also sort on
+        `nutrition.kcal` / `nutrition.proteinG` / `nutrition.carbsG` /
+        `nutrition.fatG` / `nutrition.fiberG` / `nutrition.sugarG` /
+        `nutrition.sodiumMg` / `densityGPerMl`; rows with no value sort last.
       schema: { type: string }
 
   responses:

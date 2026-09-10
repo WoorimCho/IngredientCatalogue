@@ -80,6 +80,20 @@ class OpenApiContractTest {
     }
 
     @Test
+    void sortIngredientsByNutrient_matchesContract() throws Exception {
+        mvc.perform(get("/api/ingredients?tag=diet:vegan&sort=nutrition.kcal,desc"))
+                .andExpect(status().isOk())
+                .andExpect(openApi().isValid(validator));
+    }
+
+    @Test
+    void sortNutritionReferenceByNutrient_matchesContract() throws Exception {
+        mvc.perform(get("/api/nutrition-reference?sort=kcal,desc"))
+                .andExpect(status().isOk())
+                .andExpect(openApi().isValid(validator));
+    }
+
+    @Test
     void getIngredient_matchesContract() throws Exception {
         String body = mvc.perform(post("/api/ingredients").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"rice\"}"))

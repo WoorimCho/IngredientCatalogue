@@ -8,6 +8,7 @@ import com.example.cataloguecommon.tag.TagService;
 import com.example.ingredientcatalogue.Model.Ingredient;
 import com.example.ingredientcatalogue.Repositories.IngredientRepository;
 import com.example.ingredientcatalogue.Repositories.IngredientSpecifications;
+import com.example.ingredientcatalogue.Sorting;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -38,6 +39,7 @@ public class IngredientServiceImpl implements IngredientService {
     @Transactional(readOnly = true)
     public Page<IngredientResponse> search(String name, Collection<String> tags, String match,
                                            Collection<String> excludeTags, Pageable pageable) {
+        pageable = Sorting.nullsLast(pageable);   // kcal / protein / … are nullable; keep empties at the end
         Set<String> tagTerms = normaliseTags(tags);
         Set<String> excludeTerms = normaliseTags(excludeTags);
 

@@ -5,7 +5,10 @@ import com.example.ingredientcatalogue.Dto.NutritionReferenceRequest;
 import com.example.ingredientcatalogue.Dto.NutritionReferenceResponse;
 import com.example.ingredientcatalogue.Model.NutritionReference;
 import com.example.ingredientcatalogue.Repositories.NutritionReferenceRepository;
+import com.example.ingredientcatalogue.Sorting;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.SortDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -39,13 +42,19 @@ public class NutritionReferenceController {
 
     /**
      * Every reference row, or those whose name contains {@code name}
-     * (case-insensitive), ordered by name.
+     * (case-insensitive). Sorted by {@code ?sort=} (default {@code name,asc});
+     * sortable: {@code name}, {@code kcal}, {@code proteinG}, {@code carbsG},
+     * {@code fatG}, {@code fiberG}, {@code sugarG}, {@code sodiumMg},
+     * {@code basisGrams}. Rows missing a figure sort last.
      */
     @GetMapping
-    public List<NutritionReferenceResponse> list(@RequestParam(required = false) String name) {
+    public List<NutritionReferenceResponse> list(
+            @RequestParam(required = false) String name,
+            @SortDefault(sort = "name") Sort sort) {
+        Sort effective = Sorting.nullsLast(sort);
         List<NutritionReference> rows = StringUtils.hasText(name)
-                ? repository.findByNameContainingIgnoreCaseOrderByNameAsc(name.trim())
-                : repository.findAllByOrderByNameAsc();
+                ? repository.findByNameContainingIgnoreCase(name.trim(), effective)
+                : repository.findAll(effective);
         return rows.stream().map(NutritionReferenceResponse::from).toList();
     }
 

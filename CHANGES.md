@@ -1501,6 +1501,40 @@ nothing (the tag is `diet:vegan`). Now `?tag=` (each term), `match=all|any` and
 
 ---
 
+## Update — 2026-09-09 (later still): sort-by + inherited-tag recipe filter
+
+### Sort the list pages
+
+Both catalogues already took Spring's `?sort=property,dir`; the gaps were:
+
+- **Nullable columns sorted NULLs first.** MySQL puts empty `kcal` / `proteinG`
+  / … at the top of an ascending sort. `Sorting.nullsLast` rewrites every order
+  so rows with no figure always land at the end, whichever way you sort.
+  Applied in `IngredientServiceImpl.search`.
+- **Nutrition reference ignored `?sort=`.** `GET /api/nutrition-reference` was
+  hard-wired to name-asc; it now takes `?sort=` (`@SortDefault("name")`, same
+  NULLs-last treatment) over `name` / `kcal` / `proteinG` / `carbsG` / `fatG` /
+  `fiberG` / `sugarG` / `sodiumMg` / `basisGrams`. Repo methods collapsed to
+  `findByNameContainingIgnoreCase(fragment, Sort)`.
+- Ingredients also sort on the embedded `nutrition.*` paths and `densityGPerMl`;
+  recipes on `name` / `creator` / `version`. `openapi.yaml` on both spells out
+  the sortable set. Contract + integration tests added.
+
+The UI (see the UI repo) turns table headers into sort toggles — click to sort,
+click again to flip, `▲` / `▼` on the active column.
+
+### Recipe search can count tags inherited from ingredients
+
+RecipeCatalogue only knows a recipe's own tags, so `notTag=vegan` never dropped
+a recipe that's vegan only through its ingredients. The recipes list gets an
+**"include ingredient tags"** checkbox (off by default). When on, the UI pulls
+the name/ingredient-matching recipes, unions each recipe's tags with its
+ingredients' tags, applies the `tag` / `match` / `notTag` terms against that
+union, and paginates locally. No catalogue change — this is a compose-time
+concern and stays in the UI.
+
+---
+
 ## Cross-cutting rationale
 
 These principles drove most of the individual edits, so the per-file notes stay short.

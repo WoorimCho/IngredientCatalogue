@@ -206,6 +206,27 @@ class TagSearchIntegrationTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void sortByNutrientOrdersRowsAndKeepsEmptiesLast() throws Exception {
+        mvc.perform(post("/api/ingredients").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"low cal\",\"nutrition\":{\"kcal\":50}}")).andExpect(status().isCreated());
+        mvc.perform(post("/api/ingredients").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"high cal\",\"nutrition\":{\"kcal\":700}}")).andExpect(status().isCreated());
+        mvc.perform(post("/api/ingredients").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"no data\"}")).andExpect(status().isCreated());
+
+        String asc = mvc.perform(get("/api/ingredients?sort=nutrition.kcal,asc"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        // ascending: 50, then 700, then the null-nutrition row last (not first, as MySQL would default)
+        assertThat(asc.indexOf("low cal")).isLessThan(asc.indexOf("high cal"));
+        assertThat(asc.indexOf("high cal")).isLessThan(asc.indexOf("no data"));
+
+        String desc = mvc.perform(get("/api/ingredients?sort=nutrition.kcal,desc"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(desc.indexOf("high cal")).isLessThan(desc.indexOf("low cal"));
+        assertThat(desc.indexOf("low cal")).isLessThan(desc.indexOf("no data"));   // empties still last
+    }
+
     private long total(String query) throws Exception {
         String body = mvc.perform(get("/api/ingredients" + query))
                 .andExpect(status().isOk())
