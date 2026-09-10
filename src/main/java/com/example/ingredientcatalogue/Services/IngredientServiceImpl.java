@@ -10,10 +10,12 @@ import com.example.ingredientcatalogue.Repositories.IngredientRepository;
 import com.example.ingredientcatalogue.Repositories.IngredientSpecifications;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -34,38 +36,39 @@ public class IngredientServiceImpl implements IngredientService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<IngredientResponse> search(String name, Collection<String> tags, String match, Pageable pageable) {
-        Set<String> names = tags == null ? Set.of() : tags.stream()
+    public Page<IngredientResponse> search(String name, Collection<String> tags, String match,
+                                           Collection<String> excludeTags, Pageable pageable) {
+        Set<String> tagTerms = normaliseTags(tags);
+        Set<String> excludeTerms = normaliseTags(excludeTags);
+
+        List<Specification<Ingredient>> parts = new ArrayList<>();
+        if (StringUtils.hasText(name)) {
+            parts.add(IngredientSpecifications.nameContains(name));
+        }
+        if (!tagTerms.isEmpty()) {
+            parts.add("any".equalsIgnoreCase(match)
+                    ? IngredientSpecifications.hasAnyTag(tagTerms)
+                    : IngredientSpecifications.hasAllTags(tagTerms));
+        }
+        if (!excludeTerms.isEmpty()) {
+            parts.add(IngredientSpecifications.lacksAllTags(excludeTerms));
+        }
+
+        if (parts.isEmpty()) {
+            return ingredientRepository.findAll(pageable).map(IngredientResponse::from);
+        }
+        Specification<Ingredient> spec = parts.get(0);
+        for (int i = 1; i < parts.size(); i++) {
+            spec = spec.and(parts.get(i));
+        }
+        return ingredientRepository.findAll(spec, pageable).map(IngredientResponse::from);
+    }
+
+    private static Set<String> normaliseTags(Collection<String> raw) {
+        return raw == null ? Set.of() : raw.stream()
                 .map(TagService::normalise)
                 .filter(StringUtils::hasText)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        boolean hasName = StringUtils.hasText(name);
-
-        // Tag filter present: keep the hand-tuned queries whose paging/count are
-        // known-good; narrow by name afterwards when both are given.
-        if (!names.isEmpty()) {
-            Page<Ingredient> page = "any".equalsIgnoreCase(match)
-                    ? ingredientRepository.findByAnyTagName(names, pageable)
-                    : ingredientRepository.findByAllTagNames(names, names.size(), pageable);
-            if (!hasName) {
-                return page.map(IngredientResponse::from);
-            }
-            String needle = name.trim().toLowerCase(java.util.Locale.ROOT);
-            List<IngredientResponse> filtered = page.getContent().stream()
-                    .filter(i -> i.getName() != null && i.getName().toLowerCase(java.util.Locale.ROOT).contains(needle))
-                    .map(IngredientResponse::from)
-                    .toList();
-            return new org.springframework.data.domain.PageImpl<>(filtered, pageable, filtered.size());
-        }
-
-        // Name only.
-        if (hasName) {
-            return ingredientRepository.findAll(IngredientSpecifications.nameContains(name), pageable)
-                    .map(IngredientResponse::from);
-        }
-
-        // No filters: the plain paged list (identical to before).
-        return ingredientRepository.findAll(pageable).map(IngredientResponse::from);
     }
 
     @Override

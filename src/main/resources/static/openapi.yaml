@@ -30,13 +30,22 @@ paths:
           example: oat
         - name: tag
           in: query
-          description: Repeatable. Tag names to filter by (case-insensitive).
+          description: >-
+            Repeatable. Tag terms — each matches a tag name anywhere
+            (case-insensitive substring), so "vegan" finds "diet:vegan".
           schema: { type: array, items: { type: string } }
-          example: ["diet:vegan", "nut-free"]
+          example: ["vegan", "nut-free"]
         - name: match
           in: query
-          description: '`all` (default) requires every tag; `any` requires at least one.'
+          description: '`all` (default) requires every term; `any` requires at least one.'
           schema: { type: string, enum: [all, any], default: all }
+        - name: notTag
+          in: query
+          description: >-
+            Repeatable. Tag terms to exclude — an ingredient with any tag matching
+            one of these is dropped. ANDed with `tag`.
+          schema: { type: array, items: { type: string } }
+          example: ["nut"]
         - { $ref: '#/components/parameters/Page' }
         - { $ref: '#/components/parameters/Size' }
         - { $ref: '#/components/parameters/Sort' }

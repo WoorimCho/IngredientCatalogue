@@ -74,6 +74,20 @@ class TagSearchIntegrationTest {
         assertThat(total("?tag=diet:vegan&tag=nut-free")).isEqualTo(1);       // only Tofu has both
         assertThat(total("?tag=diet:vegan&tag=nut-free&match=any")).isEqualTo(3);
         assertThat(total("?tag=diet:carnivore")).isZero();
+        // tag terms match anywhere in a tag name (like the tag search / autocomplete)
+        assertThat(total("?tag=vegan")).isEqualTo(2);
+        assertThat(total("?tag=vegan&tag=nut")).isEqualTo(1);                 // Tofu: a "vegan"-ish and a "nut"-ish tag
+    }
+
+    @Test
+    void excludeTagsDropIngredientsCarryingThem() throws Exception {
+        create("Tofu", "diet:vegan", "nut-free");
+        create("Peanut", "diet:vegan");
+        create("Cashew", "nut-free");
+
+        assertThat(total("?notTag=nut")).isEqualTo(1);                        // only Peanut has no "nut"-ish tag
+        assertThat(total("?tag=vegan&notTag=nut")).isEqualTo(1);             // vegan things that aren't "nut"-ish -> Peanut
+        assertThat(total("?notTag=vegan&notTag=nut")).isZero();
     }
 
     @Test

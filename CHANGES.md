@@ -1458,6 +1458,49 @@ client-side from the `scaledMillilitres` the BFF already returns. No BFF change.
 
 ---
 
+## Update — 2026-09-09 (later): search follow-ups + portions calories
+
+Bug reports + follow-ups on the ergonomics pass above.
+
+### Tag filters match a fragment anywhere (both catalogues)
+
+The tag *search* became a substring match, but filtering recipes / ingredients
+*by tag* was still exact — so typing "vegan" in the recipe tag filter found
+nothing (the tag is `diet:vegan`). Now `?tag=` (each term), `match=all|any` and
+`?notTag=` all match a tag name anywhere, case-insensitive.
+
+- `RecipeSpecifications` / `IngredientSpecifications` — `hasAnyTag`, `hasAllTags`,
+  `lacksAllTags` switched from `.in(names)` / `cb.equal` to `cb.like(%term%)`.
+  "has all" is still one join per term (no `group by … having`).
+- `IngredientServiceImpl.search` was routed through composed Specifications
+  (name + tags + excludeTags + `findAll(spec, pageable)`), replacing the branch
+  that filtered a page in memory and reported a wrong total when name + tag were
+  combined. `findByAnyTagName` / `findByAllTagNames` stay as the DataJpaTest's
+  dialect-guard reference, just unused by the service.
+- Guarded by new cases in both `TagSearchIntegrationTest`s +
+  `RecipeRepositoryDataJpaTest`.
+
+### `?notTag=` for ingredient search too
+
+`GET /api/ingredients` gains the repeatable `notTag` (mirrors recipes). Service
++ controller + `openapi.yaml` + `OpenApiContractTest`. UI ingredient list gets an
+"exclude tag(s)" field; `IngredientClient.list` passes it through.
+
+### Portions: anchor bridges volume ↔ weight; batch grams + calories
+
+- `RecipeCalculatorService.resolveScale` — "scale from one line" with an anchor
+  in `cup` against a `g` line (or vice-versa) was a 400. It now converts both
+  sides through grams using the ingredient's density (own or `CommonDensities`),
+  same as the calculators; only 400s if no density is known, with a message that
+  says so. It runs after the line ingredients are resolved so the density is on
+  hand.
+- `ScaledLine.scaledKcal` + `PortionResult.totalGrams` / `totalKcal` — each line
+  now carries its calories for the scaled weight, and the result totals what it
+  could weigh. `calculators/portions.html` shows a "Calories" column and a
+  "Batch ≈ N g · N kcal" line that track the slider live.
+
+---
+
 ## Cross-cutting rationale
 
 These principles drove most of the individual edits, so the per-file notes stay short.

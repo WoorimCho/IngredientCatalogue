@@ -14,12 +14,15 @@ public interface IngredientService {
 
     /**
      * List ingredients, optionally filtered by a name fragment and/or by tag.
+     * Tag terms match a tag name anywhere (case-insensitive substring).
      *
-     * @param name  case-insensitive substring of the ingredient name; {@code null}/blank means "no filter"
-     * @param tags  tag names to filter by; {@code null} or empty means "no filter"
-     * @param match {@code "all"} (default) requires every tag, {@code "any"} requires at least one
+     * @param name        case-insensitive substring of the ingredient name; {@code null}/blank means "no filter"
+     * @param tags        tag terms to require; {@code null} or empty means "no filter"
+     * @param match       {@code "all"} (default) requires every term, {@code "any"} requires at least one
+     * @param excludeTags tag terms to exclude — an ingredient with any matching tag is dropped
      */
-    Page<IngredientResponse> search(String name, Collection<String> tags, String match, Pageable pageable);
+    Page<IngredientResponse> search(String name, Collection<String> tags, String match,
+                                    Collection<String> excludeTags, Pageable pageable);
 
     IngredientResponse get(long id);
 

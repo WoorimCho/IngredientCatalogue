@@ -33,7 +33,7 @@ plus the shared **tag** vocabulary and a static **nutrition reference**.
 ### `/api/ingredients`
 | | |
 |---|---|
-| `GET /` | `?name=` (substring), `?tag=` (repeatable) + `?match=all\|any`, paged |
+| `GET /` | `?name=` (substring), `?tag=` (repeatable) + `?match=all\|any`, `?notTag=` (repeatable — exclude), paged. Tag terms match a tag name **anywhere** (`?tag=vegan` → `diet:vegan`) |
 | `GET /{id}` | one |
 | `GET /by-ids?id=1&id=2` | batch resolve (cross-service; unknown ids omitted) |
 | `POST /` | create (`name`, `tags[]`, optional `nutrition`, optional `densityGPerMl`) |

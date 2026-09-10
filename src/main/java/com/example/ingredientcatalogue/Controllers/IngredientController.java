@@ -43,11 +43,13 @@ public class IngredientController {
 
     /**
      * List ingredients, optionally filtered by a name fragment and/or by tag.
+     * Tag terms match a tag name anywhere ("vegan" finds "diet:vegan").
      * <pre>
      * GET /api/ingredients
      * GET /api/ingredients?name=oat                                     name contains "oat" (autocomplete)
-     * GET /api/ingredients?tag=diet:vegan&amp;tag=nut-free               has ALL of them (default)
-     * GET /api/ingredients?tag=diet:vegan&amp;tag=diet:keto&amp;match=any  has ANY of them
+     * GET /api/ingredients?tag=vegan&amp;tag=nut-free                     has ALL of them (default)
+     * GET /api/ingredients?tag=vegan&amp;tag=keto&amp;match=any            has ANY of them
+     * GET /api/ingredients?tag=oil&amp;notTag=nut                         "oil"-ish, but nothing "nut"-ish
      * GET /api/ingredients?page=0&amp;size=20&amp;sort=name,asc
      * </pre>
      */
@@ -56,11 +58,12 @@ public class IngredientController {
             @RequestParam(name = "name", required = false) String name,
             @RequestParam(name = "tag", required = false) List<String> tags,
             @RequestParam(name = "match", defaultValue = "all") String match,
-            // Sort by id, not name: the "match=all" query groups by id, and some
-            // databases reject ordering by a non-grouped column. Callers can still
-            // pass ?sort=name,asc explicitly when not filtering by tag.
+            @RequestParam(name = "notTag", required = false) List<String> excludeTags,
+            // Sort by id, not name: the tag filter uses SELECT DISTINCT with joins,
+            // and some databases reject ordering by a column outside that projection.
+            // Callers can still pass ?sort=name,asc explicitly when not filtering by tag.
             @PageableDefault(size = 20, sort = "id") Pageable pageable) {
-        return PageResponse.of(ingredientService.search(name, tags, match, pageable));
+        return PageResponse.of(ingredientService.search(name, tags, match, excludeTags, pageable));
     }
 
     @GetMapping("/{id}")
