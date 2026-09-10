@@ -77,6 +77,24 @@ class TagSearchIntegrationTest {
     }
 
     @Test
+    void tagSearchMatchesTheFragmentAnywhereInTheName() throws Exception {
+        create("Tofu", "diet:vegan", "high-protein");
+        create("Seitan", "vegan-friendly");
+        create("Cheese", "vegetarian");
+
+        String hits = mvc.perform(get("/api/tags?prefix=vega"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        // substring, not just prefix: "diet:vegan" and "vegan-friendly" both match "vega"
+        assertThat(hits).contains("diet:vegan").contains("vegan-friendly").doesNotContain("vegetarian");
+
+        String mid = mvc.perform(get("/api/tags?prefix=protein"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(mid).contains("high-protein");
+    }
+
+    @Test
     void byIdsReturnsOnlyTheIngredientsThatExist() throws Exception {
         create("Rice Noodles");
         create("Tamarind Paste");

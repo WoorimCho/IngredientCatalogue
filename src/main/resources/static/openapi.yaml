@@ -265,11 +265,14 @@ paths:
   /api/tags:
     get:
       tags: [tags]
-      summary: List / autocomplete tags
+      summary: List / search / autocomplete tags
       parameters:
         - name: prefix
           in: query
-          description: Name starts with this (autocomplete).
+          description: >-
+            Case-insensitive substring of the tag name — matches anywhere, not
+            just the start (the name is kept for compatibility). e.g. "vegan"
+            finds "diet:vegan".
           schema: { type: string }
         - name: namespace
           in: query

@@ -1404,6 +1404,60 @@ handful of queries, not dozens.
 
 ---
 
+## Update — 2026-09-09: search & form ergonomics
+
+Four related quality-of-life changes across `catalogue-common`, both catalogues
+and the UI.
+
+### 1. Tag search is a substring match (`catalogue-common`)
+
+`TagRepository.findByNameStartingWithIgnoreCase` → `findByNameContainingIgnoreCase`.
+`?prefix=vegan` on `/api/tags` now finds `diet:vegan`, `vegan-friendly`, … — it
+matches anywhere in the name, not just the start. The HTTP param is still called
+`prefix` (compat); the service param is `nameContains`. Prefix hits are a subset
+of substring hits, so every existing autocomplete just gets broader. Both
+catalogues' `openapi.yaml` + `TagController` javadoc updated;
+`IngredientCatalogue/TagSearchIntegrationTest` gains a case.
+
+### 2. Exclude tags when searching recipes (`RecipeCatalogue`)
+
+`GET /api/recipes` (and `/random`) take a repeatable `notTag`. A recipe carrying
+**any** `notTag` is dropped; it's ANDed with `tag`, so
+`?tag=quick&notTag=diet:vegan` is "quick but not vegan".
+`RecipeSpecifications.lacksAllTags` is a `NOT IN (subquery)` — a negated join
+would have broken the main query's `distinct` and its other joins. `search` /
+`random` / `buildSpec` thread the new collection through; `openapi.yaml` +
+`TagSearchIntegrationTest` + `OpenApiContractTest` cover it. RecipeCatalogue
+**35 → 37** tests.
+
+### 3. UI: recipe & ingredient fields take names, not ids
+
+Everywhere the UI asked for a catalogue id it now asks for a **name** with
+`/suggest/*` autocomplete; the controller resolves it (`IngredientClient.resolveId` /
+`resolveIds`) and, on a create/edit with an unknown name, re-renders the form
+from `RecipeForm.toModel()` with an error so nothing typed is lost.
+
+- `recipes/form.html` — "Ingredient id" → "Ingredient" (name); "Replacement ids"
+  → "Replacement ingredients" (names). `RecipeForm` reworked: `lineIngredientName`
+  / `lineReplacementNames`, `allIngredientNames()`, `toBody(Map<String,Long>)`,
+  `toModel()` → a `RecipeForm.View` the template renders for both edit and error.
+- `recipes/list.html` — the "ingredient id(s)" filter → "uses ingredient…" (name).
+- `calculators/portions.html` — "Anchor ingredient id" → "Anchor ingredient" (name).
+- `suggest.js` exposes `window.rewireSuggests(root)` so runtime-cloned recipe
+  rows get autocomplete too.
+
+REST APIs and CSV import are unchanged — still id-based (they're the machine
+surface; the UI resolves before calling).
+
+### 4. UI: portion "show amounts as" gains **US volume**
+
+`calculators/portions.html` toggle is now *as written / grams / millilitres /
+US volume*. "US volume" renders each line's millilitres as a kitchen measure —
+cups (nearest ¼) once it's ~a cupful, else tbsp (nearest ½), else tsp — computed
+client-side from the `scaledMillilitres` the BFF already returns. No BFF change.
+
+---
+
 ## Cross-cutting rationale
 
 These principles drove most of the individual edits, so the per-file notes stay short.

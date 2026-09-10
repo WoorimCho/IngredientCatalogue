@@ -44,8 +44,9 @@ plus the shared **tag** vocabulary and a static **nutrition reference**.
 | `POST /import` (multipart `file`) | CSV bulk import — always 200 with an `ImportResult` |
 
 ### `/api/tags`
-`GET /` (`?prefix=` autocomplete, `?namespace=`), `GET /{id}`, `POST /`,
-`PUT /{id}`, `DELETE /{id}`, `POST /merge` (`{from:[ids], into:id}`).
+`GET /` (`?prefix=` — a case-insensitive **substring** match, so "vegan" finds
+"diet:vegan"; `?namespace=`), `GET /{id}`, `POST /`, `PUT /{id}`, `DELETE /{id}`,
+`POST /merge` (`{from:[ids], into:id}`).
 
 ### `/api/nutrition-reference`
 `GET /` (`?name=`), **`POST /`** (add a row — 201, or 409 on a duplicate name).
