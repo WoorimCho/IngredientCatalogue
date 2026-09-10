@@ -1336,6 +1336,74 @@ added. UI tests still **5**.
 
 ---
 
+## Update — 2026-09-09: backlog polish — BFF caching + fan-out, recipe-list N+1
+
+Three parked "polish" items off `../Allergen-Information-System/TODO.txt`.
+
+### 1. Cache `IngredientCatalogueClient.byIds` (BFF)
+
+A composed recipe view, then its nutrition / calorie / portion calculators, all
+resolve the *same* set of line-ingredient ids from IngredientCatalogue — and the
+portion slider re-requests on every drag. Now `@Cacheable("ingredientsByIds")`,
+Caffeine, `expireAfterWrite=45s`, `maximumSize=1000`.
+
+- `pom.xml` — `spring-boot-starter-cache` + `com.github.ben-manes.caffeine:caffeine`.
+- `bff/CacheConfig.java` (new) — just `@EnableCaching` + the cache-name constant.
+- `application.properties` — `spring.cache.type=caffeine` + the Caffeine spec.
+- Key is `new java.util.TreeSet(#ids)` — a *set*, so call order / collection type
+  don't fragment the cache. Return is now `Collectors.toUnmodifiableMap(...)` — a
+  cached value that must not be mutated.
+- 45 s: short enough that an ingredient edit shows through quickly, long enough
+  to fold a whole "open recipe → run every calculator → drag the slider" session
+  into one downstream call.
+
+### 2. Parallelise the personalised `compose()` (BFF)
+
+`RecipeCompositionService.compose(id, accountId)` made three serial downstream
+round trips: recipe, then the account's restrictions, then its favourite
+substitutions. They don't depend on each other. Now all three go out at once via
+`CompletableFuture.supplyAsync(..., bffDownstreamExecutor)`, then are joined in
+priority order (recipe first, so a bad id still surfaces as the failure —
+unwrapped from `CompletionException` so `BffExceptionHandler` still maps it).
+
+- `bff/DownstreamExecutorConfig.java` (new) — a 6-thread daemon pool, wrapped in
+  `DelegatingSecurityContextExecutorService` (the outbound HMAC signer reads the
+  acting user from the `SecurityContext`; a worker thread would otherwise sign as
+  "no user" and the User service would 403 the account-scoped calls) and then
+  `ContextExecutorService` (Micrometer trace context → the parallel calls stay in
+  one Zipkin trace).
+- `RecipeCompositionServiceTest` — constructor gained the executor; tests pass a
+  same-thread `ExecutorService` so the fan-out stays deterministic against the
+  order-sensitive `MockRestServiceServer`. +1 test (bad id on the personalised
+  path still 404s). BFF suite **28 → 30**.
+- The no-account `compose(id)` path and the calculators are unchanged — they have
+  a real data dependency (`getRecipe` → `byIds`) and nothing to overlap. The
+  cache above is what helps them.
+
+### 3. Recipe-list N+1 (RecipeCatalogue)
+
+`RecipeResponse.from` touches four lazy collections per row — `steps`, each
+step's `tools`, `ingredients`, each ingredient's `replacements` — plus `tags`. A
+page of N recipes fired N+1 selects per collection.
+
+- `application.properties` — `spring.jpa.properties.hibernate.default_batch_fetch_size=64`.
+  Hibernate now loads each collection for up to 64 parents in one
+  `... where parent_id in (?, ?, …)`.
+- **Not** `@EntityGraph`: join-fetching a collection alongside `Pageable` makes
+  Hibernate paginate in memory (`HHH000104`). Batch fetching keeps the search a
+  real SQL page and still collapses the follow-up selects. It also helps `get`,
+  `getByIds` and the tag-cleanup path for free.
+- `RecipeListQueryCountDataJpaTest` (new) — seeds 8 fully-populated recipes,
+  asserts the whole page maps in **≤ 12** queries (unbatched: ~40+). RecipeCatalogue
+  suite **+1**.
+
+Verified in the running stack: `/bff/recipes/{id}` and all three calculators
+still correct; second calculator call on the same recipe makes no
+`/api/ingredients/by-ids` request (cache hit); `/api/recipes?size=20` issues a
+handful of queries, not dozens.
+
+---
+
 ## Cross-cutting rationale
 
 These principles drove most of the individual edits, so the per-file notes stay short.
