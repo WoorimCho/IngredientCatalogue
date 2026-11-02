@@ -29,17 +29,65 @@ the BFF IDOR ownership check, stored-XSS escaping, SQLi, mass assignment.
 | **N7** | 🟠 | **Anonymous writes through the UI** *(found 2026-10-14 while fixing N4)*. The UI's `AuthInterceptor` guarded only `/account/**`, `/favourites/**` and the calculators, and `SecurityConfig` is `permitAll`, so **every write route — and the import / crawl tools — worked with no session**. Confirmed live: a never-logged-in `POST /ingredients` → 302 + the row was created and then deleted by the same visitor; an anonymous `POST /recipes/import-url/preview` reached the crawler. The UI signs those calls with the shared HMAC secret, so C1/C2 never see an unauthenticated caller. It also makes **N2 reachable by anyone**, not just "any logged-in user" as N2 is worded, and puts the catalogue's integrity in every visitor's hands once `:8081` is public. | Default-deny: every non-GET needs a session except sign in / up / out and the theme switch; the new / edit forms and the import / crawl tools need one to open. |
 
 **Still open:** N1, N2, N6, M3 (register enumeration — mitigated at the UI edge,
-still distinct on the HMAC-gated User API), M4 (no rate limiting), H4 (DB creds
-still trivial values), `/actuator/**` unauthenticated on every service, **no TLS
-anywhere** (the HMAC signs method+path only — not body/query). **N3, N4, N5 and
-N7 were fixed 2026-10-14** (see the remediation log).
+still distinct on the HMAC-gated User API), M4 (no rate limiting),
+`/actuator/**` unauthenticated on every service, **no TLS anywhere** (the HMAC
+signs method+path only — not body/query). **N3, N4, N5 and N7 were fixed
+2026-10-14, and H4 (database credentials) on 2026-11-01** — see the remediation
+log.
 
 **Priority:** N1 (random secret) · N2 (SSRF guard — before any AWS deploy) ·
-then the carry-overs (M3/M4/H4/TLS).
+then the carry-overs (M3/M4/TLS).
 
 ---
 
 ## Remediation log
+
+**2026-11-01 — Phase 5A, H4 (database credentials):**
+- **H4 fixed** — the database passwords were trivial literals (a 10-character
+  root password and a 6-character app password) committed in the per-service
+  `compose.yaml` files, and repeated as defaults in each service's
+  `application.properties` and in the READMEs' config tables — in public
+  repositories. All of that is gone from the working trees:
+  - `IngredientCatalogue`, `RecipeCatalogue` and `User` `compose.yaml` read
+    `${MYSQL_ROOT_PASSWORD:?set in .env}` / `${MYSQL_PASSWORD:?set in .env}` —
+    **no default**, so Compose refuses to start rather than fall back to a
+    committed value. An *empty* value is refused too, so copying
+    `.env.example` unchanged does not start the stack. `.env` is git-ignored;
+    `.env.example` carries the variable names and no values.
+  - The healthcheck no longer embeds the password: it reads the container's own
+    `MYSQL_ROOT_PASSWORD` (`$$` keeps Compose from interpolating it).
+  - `spring.datasource.password` has **no default** in the three services'
+    `application.properties`: in a container it arrives as
+    `SPRING_DATASOURCE_PASSWORD`; from the IDE, Spring Boot's docker-compose
+    support takes it from the running MySQL container, which got it from `.env`.
+  - In `Allergen-Information-System` (the BFF has had no database since Phase
+    3) the credentials survived only in commented-out blocks of the published
+    `compose.yaml`; the cleanup commit deletes them. `.env` is git-ignored there
+    too.
+  - The module `compose.yaml` files also publish their database and app ports on
+    `127.0.0.1` only (they were `0.0.0.0`) — which closes the "module-local
+    compose files not yet localhost-bound" item.
+- **Rotated, not just hidden.** The old values sat in public repositories (and
+  stay in git history), so they are treated as burned. The root stack's
+  passwords were changed to fresh 192-bit random values: the MySQL image applies
+  `MYSQL_*_PASSWORD` only when it first initialises a data volume, so changing
+  `.env` alone would have left the published passwords working — `ALTER USER`
+  was run in the live container for `root@localhost`, `root@%` and `myuser@%`.
+  **Verified live:** the new passwords are accepted and the old ones are
+  rejected, both right after the change and again after the container was
+  recreated; all services reconnect healthy; the end-to-end smoke test passes.
+- Also verified: with no `.env`, or with `.env.example` unfilled, `docker compose
+  config` stops with `required variable MYSQL_PASSWORD is missing a value: set
+  in .env` for each of the four compose files; `./gradlew bootRun` from the IDE
+  (docker-compose support + `.env`) starts and reports healthy against the
+  module's own MySQL on `127.0.0.1:3307`.
+- **Not part of H4 / still open:** all three services still connect as the one
+  shared `myuser` account with rights on every schema (least-privilege users per
+  service are a separate hardening step); Grafana's admin password still
+  defaults to `admin`; and the HMAC secret (N1) is the other published secret.
+  Any database volume that was initialised with the old values keeps them until
+  it is rotated or recreated (`docker compose down -v` in the module that owns
+  it).
 
 **2026-10-14 — Phase 5A, first pass (N3 / N4 / N5 / N7):**
 - **N3 fixed** — the login `next` was not the only open redirect: the favourites
@@ -152,11 +200,12 @@ then the carry-overs (M3/M4/H4/TLS).
 - **L2 partly fixed** — BFF calculators reject a non-finite `scale` and
   `servings < 1` with **400** (was `NaN`-through / silent clamp).
 
-Still open: **H4** (DB creds → untracked `.env`; the root `compose.yaml` is no
-longer version-controlled, but per-service `compose.yaml` files still carry
-them), **M3** (register enumeration), **M4** (no rate limiting), the module-local
-`compose.yaml` files (not yet localhost-bound), `/actuator` unprotected, the
-low-severity L1–L7.
+Still open *at the time* (**H4** and the module-local `compose.yaml`
+localhost-binding were fixed on 2026-11-01 — see above): **H4** (DB creds →
+untracked `.env`; the root `compose.yaml` is no longer version-controlled, but
+per-service `compose.yaml` files still carry them), **M3** (register
+enumeration), **M4** (no rate limiting), the module-local `compose.yaml` files
+(not yet localhost-bound), `/actuator` unprotected, the low-severity L1–L7.
 
 **Verdict:** the browser-facing edge (BFF `/bff/**`, Thymeleaf output escaping,
 password handling, DTO boundaries) is genuinely well-built. The problem is the
@@ -241,10 +290,19 @@ persistent admin foothold. **Fix:** anonymous → `Viewer` or off; bind `:3000`
 to localhost.
 
 ### H4 — MySQL exposed with weak, in-repo credentials
-`:3306` open; `root`/`verysecret`, `myuser`/`secret` are hard-coded in committed
-`compose.yaml` files. `mysql -uroot -pverysecret` from the host dumps all three
-schemas — PII + **BCrypt hashes for offline cracking**. **Fix:** don't publish
-3306; move creds to an untracked `.env`; use non-trivial values.
+
+> **FIXED 2026-11-01** — credentials removed from every `compose.yaml`, from the
+> `application.properties` defaults and from the docs; `${MYSQL_*:?set in .env}`
+> makes Compose refuse to start without them; `.env` git-ignored, `.env.example`
+> names only; the live passwords **rotated** (old ones rejected). See the
+> remediation log.
+
+`:3306` was open, and trivially guessable root and app passwords were hard-coded
+in committed `compose.yaml` files (and as defaults in `application.properties`).
+With the repository in hand, a `mysql -uroot -p<the committed value>` from the
+host dumped all three schemas — PII + **BCrypt hashes for offline cracking**.
+**Fix:** don't publish 3306 (done in H1); move creds to an untracked `.env`; use
+non-trivial values — and, because the old ones were public, rotate them.
 
 ---
 

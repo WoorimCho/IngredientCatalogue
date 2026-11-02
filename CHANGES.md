@@ -1629,6 +1629,33 @@ smoke against the rebuilt stack: 63 checks.
 
 ---
 
+## Update — 2026-11-01: H4, database credentials out of the repositories
+
+The weak MySQL passwords were committed in the per-service `compose.yaml` files
+(and repeated as `application.properties` defaults and in the READMEs' config
+tables) in public repositories. Detail and live verification in `SECURITY.md`
+→ remediation log; in short:
+
+- **`compose.yaml`** in `IngredientCatalogue` / `RecipeCatalogue` / `User` now
+  reads `${MYSQL_ROOT_PASSWORD:?set in .env}` and `${MYSQL_PASSWORD:?set in .env}`
+  (no default — Compose refuses to start, and an unfilled `.env.example` is
+  refused too). `.env` is git-ignored in those repos and in
+  `Allergen-Information-System`; each module has a names-only `.env.example`.
+- The healthcheck reads the container's own `MYSQL_ROOT_PASSWORD` instead of
+  embedding the value; the module databases and apps publish on `127.0.0.1`
+  only (they were `0.0.0.0`).
+- `spring.datasource.password` has **no default** in the three services;
+  `SPRING_DATASOURCE_PASSWORD` (containers) or Spring Boot's docker-compose
+  support (IDE, reads `.env`) supplies it.
+- The live root stack's passwords were **rotated** (`ALTER USER` in the running
+  container — the image only applies `MYSQL_*_PASSWORD` to a fresh volume, so
+  editing `.env` alone would have left the published ones working); old
+  passwords rejected, new accepted; stack healthy; end-to-end smoke 64/64.
+- READMEs: the `myuser` / `secret` config rows replaced by "no default, from
+  `.env`", plus the `.env` setup step.
+
+---
+
 ## Cross-cutting rationale
 
 These principles drove most of the individual edits, so the per-file notes stay short.

@@ -59,19 +59,28 @@ Contract: `src/main/resources/static/openapi.yaml` (served at
 ## Run
 
 ```bash
-cd .. && docker compose up --build ingredient-catalogue
+# once: database passwords live in a git-ignored .env, never in the repo
+cp .env.example .env     # then fill in MYSQL_ROOT_PASSWORD and MYSQL_PASSWORD (openssl rand -hex 24)
+
+cd .. && docker compose up --build ingredient-catalogue    # root stack: reads ../.env
 
 # local — needs a MySQL with schema `ingredient_catalogue`
 docker compose up -d mysql
-./gradlew bootRun
+./gradlew bootRun        # Spring Boot's docker-compose support reads .env and
+                         # takes the JDBC credentials from the running container
 ```
+
+`compose.yaml` refuses to start while a password is unset or empty (finding H4).
+If a container from before this change still exists, its old password survives
+the new `.env` — `docker compose down -v` first (this wipes that dev database).
 
 ## Configuration (env)
 
 | Var | Default |
 |---|---|
 | `SPRING_DATASOURCE_URL` | `jdbc:mysql://localhost:3307/ingredient_catalogue` |
-| `SPRING_DATASOURCE_USERNAME` / `_PASSWORD` | `myuser` / `secret` |
+| `SPRING_DATASOURCE_USERNAME` | `myuser` |
+| `SPRING_DATASOURCE_PASSWORD` | **none** — set from `MYSQL_PASSWORD` (`.env`); the app fails to connect without it |
 | `SERVER_PORT` | `8082` |
 | `ZIPKIN_ENDPOINT` | `http://localhost:9411/api/v2/spans` |
 

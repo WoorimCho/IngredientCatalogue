@@ -1,16 +1,27 @@
+# Local dev database for IngredientCatalogue, plus the service itself under the
+# "full" profile.
+#
+# No credentials live in this file. Copy .env.example to .env (git-ignored), set
+# the two passwords (`openssl rand -hex 24` makes a good one) and Compose does the
+# rest: it refuses to start while either is unset or empty. Spring Boot's
+# docker-compose support (the IDE / `./gradlew bootRun`) reads the same .env and
+# hands the app its JDBC credentials straight from the running container.
 services:
   mysql:
     image: 'mysql:8.4'
     environment:
       - 'MYSQL_DATABASE=ingredient_catalogue'
-      - 'MYSQL_PASSWORD=secret'
-      - 'MYSQL_ROOT_PASSWORD=verysecret'
+      - 'MYSQL_PASSWORD=${MYSQL_PASSWORD:?set in .env}'
+      - 'MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:?set in .env}'
       - 'MYSQL_USER=myuser'
     ports:
       # Host 3307 so the monolith (3306) and RecipeCatalogue (3308) can run alongside.
-      - '3307:3306'
+      # Loopback only: this database is for the machine it runs on.
+      - '127.0.0.1:3307:3306'
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pverysecret"]
+      # $$ stops Compose interpolating it; the shell inside the container expands it,
+      # so the password is never written into this file or the healthcheck command.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -29,9 +40,9 @@ services:
     environment:
       - 'SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/ingredient_catalogue?allowPublicKeyRetrieval=true&useSSL=false'
       - 'SPRING_DATASOURCE_USERNAME=myuser'
-      - 'SPRING_DATASOURCE_PASSWORD=secret'
+      - 'SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD:?set in .env}'
     ports:
-      - '8082:8082'
+      - '127.0.0.1:8082:8082'
     depends_on:
       mysql:
         condition: service_healthy
