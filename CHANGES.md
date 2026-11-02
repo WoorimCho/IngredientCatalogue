@@ -1647,6 +1647,10 @@ tables) in public repositories. Detail and live verification in `SECURITY.md`
 - `spring.datasource.password` has **no default** in the three services;
   `SPRING_DATASOURCE_PASSWORD` (containers) or Spring Boot's docker-compose
   support (IDE, reads `.env`) supplies it.
+- `Allergen-Information-System` (no database since Phase 3) had the old values
+  only as leftovers: commented-out lines in `compose.yaml` and
+  `application.properties`, and a stale `diagnose-mysql.ps1` that passed the app
+  password inline (`-p<password>`). All deleted.
 - The live root stack's passwords were **rotated** (`ALTER USER` in the running
   container — the image only applies `MYSQL_*_PASSWORD` to a fresh volume, so
   editing `.env` alone would have left the published ones working); old

@@ -61,9 +61,11 @@ then the carry-overs (M3/M4/TLS).
     `SPRING_DATASOURCE_PASSWORD`; from the IDE, Spring Boot's docker-compose
     support takes it from the running MySQL container, which got it from `.env`.
   - In `Allergen-Information-System` (the BFF has had no database since Phase
-    3) the credentials survived only in commented-out blocks of the published
-    `compose.yaml`; the cleanup commit deletes them. `.env` is git-ignored there
-    too.
+    3) the old credentials survived in commented-out blocks of the published
+    `compose.yaml`, in a commented-out `application.properties` default and in
+    a stale `diagnose-mysql.ps1` that passed the app password inline
+    (`mysql -u<user> -p<password>`). The cleanup commit deletes all three —
+    nothing there has a database to configure. `.env` is git-ignored there too.
   - The module `compose.yaml` files also publish their database and app ports on
     `127.0.0.1` only (they were `0.0.0.0`) — which closes the "module-local
     compose files not yet localhost-bound" item.
