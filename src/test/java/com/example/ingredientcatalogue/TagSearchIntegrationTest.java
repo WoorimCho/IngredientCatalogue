@@ -1,5 +1,7 @@
 package com.example.ingredientcatalogue;
 
+import com.example.cataloguecommon.Csv;
+import com.example.cataloguecommon.tag.TagService;
 import com.example.ingredientcatalogue.Repositories.IngredientRepository;
 import com.example.cataloguecommon.tag.TagRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -187,6 +189,73 @@ class TagSearchIntegrationTest {
         String vegan = mvc.perform(get("/api/ingredients?tag=diet:vegan"))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(vegan).contains("olive oil").contains("\"kcal\":884");
+    }
+
+    // --- SECURITY.md N4: bounded request collections ------------------------------------------
+
+    private static String tagList(int count) {
+        return java.util.stream.IntStream.rangeClosed(1, count)
+                .mapToObj(i -> "\"t" + i + "\"").collect(java.util.stream.Collectors.joining(","));
+    }
+
+    @Test
+    void exactlyTheMaximumNumberOfTagsIsAccepted() throws Exception {
+        mvc.perform(post("/api/ingredients").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Many\",\"tags\":[" + tagList(TagService.MAX_TAGS_PER_REQUEST) + "]}"))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void oneTagOverTheMaximumIsRejected() throws Exception {
+        mvc.perform(post("/api/ingredients").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Tooo many\",\"tags\":[" + tagList(TagService.MAX_TAGS_PER_REQUEST + 1) + "]}"))
+                .andExpect(status().isBadRequest());
+        assertThat(ingredientRepository.count()).isZero();
+    }
+
+    @Test
+    void anOverlongTagNameIsRejected() throws Exception {
+        mvc.perform(post("/api/ingredients").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Long tag\",\"tags\":[\"" + "a".repeat(TagService.MAX_TAG_LENGTH + 1) + "\"]}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void attachingTooManyTagsInOneCallIsRejected() throws Exception {
+        create("Plain");
+        long id = ingredientRepository.findAll().iterator().next().getId();
+        mvc.perform(post("/api/ingredients/" + id + "/tags").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tags\":[" + tagList(TagService.MAX_TAGS_PER_REQUEST + 1) + "]}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void csvIngredientRowWithTooManyTagsIsReportedPerRow() throws Exception {
+        // The importer calls the service directly (no Bean Validation), so TagService.resolve must refuse.
+        String tags = java.util.stream.IntStream.rangeClosed(1, TagService.MAX_TAGS_PER_REQUEST + 1)
+                .mapToObj(i -> "t" + i).collect(java.util.stream.Collectors.joining(";"));
+        String csv = "name,tags,kcal\n\"Tagged\",\"" + tags + "\",10\n";
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "ingredients.csv", "text/csv", csv.getBytes(StandardCharsets.UTF_8));
+
+        String body = mvc.perform(multipart("/api/ingredients/import").file(file))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("\"imported\":0", "\"skipped\":1", "at most " + TagService.MAX_TAGS_PER_REQUEST + " tags");
+        assertThat(ingredientRepository.count()).isZero();
+    }
+
+    @Test
+    void csvWithTooManyRowsIsRejectedOutright() throws Exception {
+        StringBuilder csv = new StringBuilder("name\n");
+        for (int i = 0; i <= Csv.MAX_ROWS; i++) {
+            csv.append("ing").append(i).append('\n');
+        }
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "ingredients.csv", "text/csv", csv.toString().getBytes(StandardCharsets.UTF_8));
+
+        mvc.perform(multipart("/api/ingredients/import").file(file)).andExpect(status().isBadRequest());
+        assertThat(ingredientRepository.count()).isZero();
     }
 
     private void create(String name, String... tags) throws Exception {

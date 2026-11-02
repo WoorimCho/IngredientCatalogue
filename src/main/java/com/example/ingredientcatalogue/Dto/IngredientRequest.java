@@ -1,5 +1,6 @@
 package com.example.ingredientcatalogue.Dto;
 
+import com.example.cataloguecommon.tag.TagService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
@@ -16,7 +17,7 @@ import java.util.Set;
  */
 public record IngredientRequest(
         @NotBlank @Size(max = 255) String name,
-        Set<String> tags,
+        @Size(max = TagService.MAX_TAGS_PER_REQUEST) Set<@Size(max = TagService.MAX_TAG_LENGTH) String> tags,
         @Valid NutritionDto nutrition,
         @Positive Double densityGPerMl) {
 

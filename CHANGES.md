@@ -1535,6 +1535,100 @@ concern and stays in the UI.
 
 ---
 
+## Update — 2026-09-10: LLM free-text fallback in recipe-crawler
+
+`RecipeExtractor` gains a third strategy after JSON-LD and microdata: when a page
+has no machine-readable schema.org Recipe, POST its visible text to an
+**OpenAI-compatible `/chat/completions`** endpoint and take back
+`{name, yield, ingredients[], steps[]}` — the same shape the parsers produce, so
+the existing line parser + catalogue resolve are unchanged downstream.
+
+- **Provider-neutral by request** — a plain `RestClient` over the OpenAI
+  chat-completions wire format, *not* a vendor SDK. `LLM_BASE_URL` /
+  `LLM_MODEL` / `LLM_API_KEY` point it at OpenAI, Anthropic (`/v1`), Gemini's
+  OpenAI endpoint, Groq, OpenRouter, a local Ollama, etc.
+- **Off unless all three are set.** When unconfigured the strategy throws
+  `NoRecipeFoundException` like the others (→ 422), so default behaviour is
+  identical.
+- **Import path only** — `ImportService.preview`/`commit` (single URL) call
+  `RecipeExtractor.extractWithLlmFallback`; `previewHtml`/`commitHtml` (the
+  crawler's entry points) stay on `extract`, so `POST /api/crawl` never fans out
+  into an LLM call per page.
+- Own `RestClient` (`LlmClientConfig`, 45s read timeout) + an `llm` circuit
+  breaker. Unparseable / "not a recipe" answer → 422; endpoint unreachable or
+  breaker open → 502.
+- New: `LlmClient` (iface), `OpenAiCompatibleLlmClient`, `LlmClientConfig`,
+  `LlmRecipeParser`. recipe-crawler tests **40 → 58**. README + `TODO.txt`
+  updated; `TODO.txt` "RAG portion" item closed (RDFa still open).
+
+---
+
+## Update — 2026-09-10: recipe validation + list-page navigation
+
+**A recipe must have at least one ingredient.** `RecipeServiceImpl.apply` rejects
+an empty `ingredients` list (400, "a recipe needs at least one ingredient"), so
+`create` / `update` / CSV-import rows are all covered. `RecipeIngredientDto`
+and `ReplacementDto` `ingredientId` gain `@Positive` — a `0` / negative id is a
+400. `openapi.yaml`: `ingredients` `minItems: 1`, `ingredientId` `minimum: 1`.
+RecipeCatalogue tests: fixed two helpers that created bare recipes, added
+`recipeWithNoIngredientsIsRejected` + `nonPositiveIngredientIdIsRejected`.
+
+Recipes may only use ingredients that exist in the Ingredient catalogue — this
+stays **UI-enforced** (`RecipeController.resolveOrReport` resolves every typed
+name to an id and rejects the submit if any is unknown, telling you to add the
+ingredient first). No RecipeCatalogue → IngredientCatalogue call: the catalogues
+stay decoupled; the positive-id check above is the only server-side guard. The
+UI form now also blocks a recipe with zero ingredient lines.
+
+**Get-or-create tags on create** was already working (`TagServiceImpl.resolve`
+creates any missing names; both catalogues and both UI forms pass names through)
+— verified, no change.
+
+**Manual page jump on the list pages.** Ingredients / recipes / tags / nutrition
+reference each get a shared pager fragment (`fragments/layout :: pager`, backed
+by `ui/web/Pager.java`): the existing Prev / Next plus a "Page [ N ] of M" number
+input + Go, submitting `jump` (1-based) which each controller converts. Works
+without JS; filters + sort are carried across. Nutrition reference had no
+pagination at all — the UI now slices the (small) reference list into pages of
+25. UI tests **5 → 8** (`recipeListRenders`, `tagListRenders`,
+`nutritionReferenceListRenders`).
+
+---
+
+## Update — 2026-10-14: Phase 5A first pass (N3 / N4 / N5 / N7)
+
+Housekeeping first: `includeBuild("../catalogue-common")` had been commented out
+of this repo's `settings.gradle.kts` (uncommitted), which broke the build
+(`Could not resolve com.example:catalogue-common`); restored. Full sweep: 212
+tests green; images rebuilt; end-to-end smoke 39/39.
+
+Then the quick hardening batch from the Sep 10 re-test (detail and live
+verification in `SECURITY.md` → remediation log):
+
+- **N3 — open redirects.** One `ui/web/SafeRedirect` now sanitises every redirect
+  built from request input (login `next`, favourites `back`, theme `back`); the
+  latter two had the same flaw. Only a single-slash same-site path survives.
+- **N4 — bounded requests.** `@Size` on every request collection and element
+  string, aligned with the column sizes (`RecipeCatalogue` `Dto/Limits`, `User`
+  `Dto/Limits`, `recipe-crawler` `dto/Limits`); shared tag limits enforced in
+  `catalogue-common` `TagService.resolve` (so CSV can't bypass them); `Csv.parse`
+  caps rows (5 000) and fields per row (100); `RecipeServiceImpl.apply`
+  re-checks counts for the CSV path; the UI recipe form is refused before any
+  per-name ingredient lookup. User's restrictions `PUT` was missing `@Valid`.
+- **N5 — BFF actuator** trimmed to `health,info,prometheus`.
+- **N7 (new) — anonymous writes through the UI.** `AuthInterceptor` is now
+  default-deny on the matched route: reading is public, every write needs a
+  login except sign in / up / out + the theme switch, and the new / edit forms and
+  the import / crawl tools need one to open. A route-inventory test guards it.
+  Behaviour change: creating data now requires an account.
+
+Docs: the Security sections of the IC / RC / User / crawler READMEs still said
+"every write is unauthenticated" (true before the Sep 9 HMAC work) — corrected.
+Tests **212 → 413**, all green (UI 8 → 159, mostly parameterised cases). Live
+smoke against the rebuilt stack: 63 checks.
+
+---
+
 ## Cross-cutting rationale
 
 These principles drove most of the individual edits, so the per-file notes stay short.

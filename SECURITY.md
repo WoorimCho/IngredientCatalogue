@@ -4,7 +4,99 @@ Hands-on assessment against the local Docker stack (all services + infra) on
 **2026-09-08**, plus source review. All test records created during testing were
 deleted afterwards. This file covers the **whole system**, like `CHANGES.md`.
 
+---
+
+## Re-test — 2026-09-10
+
+Full scripted pen test against the live stack + source review, covering the
+2026-09-10 changes (recipe-crawler LLM free-text fallback, recipe
+ingredient-count / positive-id validation, UI page-jump navigation).
+
+**Regression pass — all prior fixes held:** C1, C2 (raw / stale / wrong-secret /
+acting-user-mismatch / malformed all → 403, not 500), H1, H2, M1, M2, M5, M6,
+the BFF IDOR ownership check, stored-XSS escaping, SQLi, mass assignment.
+
+**New findings:**
+
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| **N1** | 🟠 | **Inter-service HMAC secret is public.** `internal-auth.secret` defaults to `dev-internal-secret-change-me` in every tracked `application.properties` and is the value the stack runs with. Anyone with repo access can forge `X-Internal-Auth` for any method/path/acting-user → **defeats C1/C2** wherever a port is reachable. | Random secret from an untracked source; drop the `@Value` default so a missing secret fails startup. |
+| **N2** | 🟠 | **SSRF via recipe-crawler.** Any logged-in UI user drives `/recipes/import-url` + `/recipes/crawl`; `RecipePageFetcher.validate` checks only the scheme + non-blank host — no loopback / RFC-1918 / rebind guard. Confirmed live: crawler fetched `ingredient-catalogue:8082`, `user:8084`, `zipkin:9411` by compose name. Blind-ish, but timing + distinct error strings are an internal port oracle. `RobotsTxt` fail-closes on a refused robots fetch (blocks closed ports, not open services). Escalates on AWS (IMDS `169.254.169.254`) and if the LLM fallback is on (internal bodies → external LLM). | Reject non-public resolved IPs (validate-time *and* on connect); cap `RobotsTxt.load()` response size. |
+| **N3** | 🟡 | **Open redirect via `?next=`.** `AuthController.login`: `next.startsWith("/")` only → `//evil.example/` → `302 Location: http://evil.example/` (confirmed). Absolute `http(s)://` is correctly ignored. (Supersedes L6 "normalised safely".) | `startsWith("/") && !startsWith("//") && !startsWith("/\\") && !contains("://")`. **Fixed 2026-10-14** (a shared `SafeRedirect`; two more sinks found and fixed). |
+| **N4** | 🟡 | **Unbounded request collections → DoS.** `RecipeRequest.{steps,ingredients,tags}`, `IngredientRequest.tags`, `User` `restrictions`/`favoriteRecipeIds`/`alternatives` have no `@Size`; element strings none. `POST /api/recipes` w/ 50 000 lines pegged a request thread > 40 s. Reachable by any signed caller. | `@Size(max=…)` on the collections + element strings; smaller JSON body cap. **Fixed 2026-10-14** (collections, elements, CSV, tags; the body-size cap is still open). |
+| **N5** | 🟢 | **BFF actuator over-exposure.** BFF exposes `caches,metrics` beyond the other four services' `health,info,prometheus`; unauth **`DELETE /actuator/caches` → 204** (cache-flush → re-fan-out DoS). Localhost-bound. | BFF exposure list → `health,info,prometheus`. **Fixed 2026-10-14.** |
+| **N6** | 🟢 | **LLM free-text fallback — prompt-injection sink (feature off by default).** Attacker-controlled page text → LLM → catalogue writes (same capability as C2, via a confused deputy). Mitigations present: input/output token caps, `json_object` mode, script/style stripped, parse-or-422. Residual: page-text egress to a 3rd party + SSRF amplification (N2). | Keep off unless needed; pair with the N2 fix; keep treating extracted fields as untrusted. |
+| **N7** | 🟠 | **Anonymous writes through the UI** *(found 2026-10-14 while fixing N4)*. The UI's `AuthInterceptor` guarded only `/account/**`, `/favourites/**` and the calculators, and `SecurityConfig` is `permitAll`, so **every write route — and the import / crawl tools — worked with no session**. Confirmed live: a never-logged-in `POST /ingredients` → 302 + the row was created and then deleted by the same visitor; an anonymous `POST /recipes/import-url/preview` reached the crawler. The UI signs those calls with the shared HMAC secret, so C1/C2 never see an unauthenticated caller. It also makes **N2 reachable by anyone**, not just "any logged-in user" as N2 is worded, and puts the catalogue's integrity in every visitor's hands once `:8081` is public. | Default-deny: every non-GET needs a session except sign in / up / out and the theme switch; the new / edit forms and the import / crawl tools need one to open. |
+
+**Still open:** N1, N2, N6, M3 (register enumeration — mitigated at the UI edge,
+still distinct on the HMAC-gated User API), M4 (no rate limiting), H4 (DB creds
+still trivial values), `/actuator/**` unauthenticated on every service, **no TLS
+anywhere** (the HMAC signs method+path only — not body/query). **N3, N4, N5 and
+N7 were fixed 2026-10-14** (see the remediation log).
+
+**Priority:** N1 (random secret) · N2 (SSRF guard — before any AWS deploy) ·
+then the carry-overs (M3/M4/H4/TLS).
+
+---
+
 ## Remediation log
+
+**2026-10-14 — Phase 5A, first pass (N3 / N4 / N5 / N7):**
+- **N3 fixed** — the login `next` was not the only open redirect: the favourites
+  `back` parameter had the identical `startsWith("/")` check, and the theme
+  switch's `safeBack` refused `//host` but not `/\host`. All three now go through
+  one `SafeRedirect.localPath`: a single-slash same-site path only; refuses `//…`,
+  `/\…`, any backslash, control characters / whitespace (browsers strip TAB, CR
+  and LF, so `/<TAB>/host` becomes `//host`), `{braces}` (`RedirectView` would try
+  to expand them as URI-template variables) and anything over 2 048 chars.
+  Verified live: `next=//evil.example/`, `/\evil.example` and
+  `https://evil.example/` all land on `/`; `next=/recipes?name=x` is honoured.
+- **N4 fixed** — every request collection and element string is bounded, aligned
+  with the V1 column sizes: **recipe** — steps 200 (text ≤ 20 000, ≤ 30 tools of
+  ≤ 100 chars), ingredient lines 100 (≤ 10 replacements each, `quantity` ≤ 100,
+  `unit` ≤ 40), `name` / `creator` ≤ 255; **tags** — ≤ 50 per request, ≤ 100 chars
+  each, enforced in `TagService.resolve` (the choke point for the JSON API, both
+  CSV importers and attach-tags) plus `@Size` for a clean 400; tag-merge sources
+  ≤ 50; **CSV** — ≤ 5 000 rows and ≤ 100 fields per row in `Csv.parse` (fails fast
+  on a multi-million-comma line); **User** — ≤ 100 restrictions of ≤ 100 chars,
+  ≤ 200 favourite substitutions per call, ≤ 1 000 favourite recipes per account;
+  **crawler** — ≤ 20 seeds, URLs ≤ 2 048 chars, `creator` ≤ 255.
+  Two things the finding didn't say: **User's `PUT …/restrictions` had no
+  `@Valid`, so no constraint on that body had ever been applied**; and the CSV
+  importers build requests without Bean Validation, so `RecipeServiceImpl.apply`
+  re-checks the counts. On the UI, resolving a recipe form is one catalogue call
+  per distinct ingredient name, so a 1 000-line form (reachable anonymously — see
+  N7) was ~1 000 sequential calls; `RecipeForm.limitViolation()` now refuses it
+  before any lookup. Verified live: a 101-line recipe form is refused with a
+  clear message; an ingredient with 51 tags is not created. **Not done:** a JSON
+  request-body size cap — the collections are bounded, but an arbitrarily large
+  body is still parsed; do that at the ingress / ALB.
+- **N5 fixed** — BFF exposure is `health,info,prometheus` (was `+caches,metrics`).
+  Verified live: `GET /actuator/caches`, `DELETE /actuator/caches` and
+  `GET /actuator/metrics` → **404**; `/actuator/prometheus` still carries
+  `cache_gets_total`.
+- **N7 found and fixed** — `AuthInterceptor` is now default-deny: reading is
+  public; every request that isn't GET / HEAD / OPTIONS needs a session, except
+  `/login`, `/register`, `/logout` and `/settings/theme`; the new / edit forms,
+  `/import`, `/recipes/import-url`, `/recipes/crawl`, the account area and the
+  calculators need one just to open. The decision is made on the route the handler
+  mapping matched (`/ingredients/{id}/edit`), not the raw URL, and uses
+  `getSession(false)` so a refused request no longer creates a session (this also
+  closes the old note that the interceptor created a session for every anonymous
+  hit). A refused write returns the user to the page they were on (`Referer`,
+  path only, through `SafeRedirect`). A route-inventory test fails the build if any
+  write route besides those four is left anonymous. Verified live: anonymous POSTs
+  to `/ingredients`, `/recipes`, `/tags`, `/tags/merge`, `/nutrition-reference`,
+  `/recipes/import-url/preview` and `/recipes/crawl`, and GETs of the new forms,
+  `/import`, `/recipes/import-url` and `/recipes/crawl` all redirect to `/login`;
+  the theme switch still works anonymously. **This is a behaviour change** —
+  anyone who relied on creating data without an account must now register (open
+  and free). To relax it, edit `LOGIN_ONLY_READS` / `ANONYMOUS_WRITES` in
+  `UI/…/web/AuthInterceptor`. It narrows N2 to "any registered user", which is
+  still not a real barrier: the SSRF guard is still required.
+- Tests: 413 across the eight repos, all green (was 212): UI 159, RecipeCatalogue
+  55, IngredientCatalogue 48, BFF 35, User 33, catalogue-common 19, recipe-crawler
+  63, GoodNightWorld 1. End-to-end smoke against the rebuilt stack: 63 checks.
 
 **2026-09-09 — Phase 5, batch 3 (UI Spring Security — H2 / M1 / M5):**
 - Added `spring-boot-starter-security` to the UI + `config/SecurityConfig`:
@@ -161,12 +253,11 @@ schemas — PII + **BCrypt hashes for offline cracking**. **Fix:** don't publish
 | # | Finding | Fix |
 |---|---|---|
 | M1 | **[FIXED 2026-09-09]** ~~Session fixation (UI)~~ — `JSESSIONID` not rotated on login; Tomcat also emits `;jsessionid=` URL rewriting. Logout *does* `invalidate()`. | `request.changeSessionId()` after auth; `server.servlet.session.tracking-modes=cookie`. |
-| M2 | **Username enumeration via login timing** — wrong password for a real user ≈ 377 ms vs unknown user ≈ 73 ms (BCrypt only runs when the user exists). Same 401 + body. | Always verify against a fixed dummy hash. |
+| M2 | **[FIXED 2026-09-09]** ~~Username enumeration via login timing~~ — wrong password for a real user ≈ 377 ms vs unknown user ≈ 73 ms (BCrypt only runs when the user exists). Same 401 + body. | `AccountServiceImpl.authenticate` now runs one BCrypt check every time, against a real hash or a dummy, so both paths take the same time. |
 | M3 | **Username/email enumeration via registration** — distinct `"username already taken"` vs `"email already registered"` from the User service. | Generic "check the form" message. |
 | M4 | **No rate limiting** anywhere — `/login`, `/register`, `/authenticate`, CSV import, calculators. | Bucket/filter per IP + per account. |
 | M5 | **[FIXED 2026-09-09]** ~~UI missing security headers~~ — no `X-Frame-Options` / `X-Content-Type-Options` / CSP / `Referrer-Policy`; catalogues send none. | Security starter, or a header filter. |
-| M6 | **`sort` param → 500** on the catalogues (`?sort=(select 1)`). *Not* SQLi — Spring Data validates the property before building SQL. It is an unhandled `PropertyReferenceException` = log-spam DoS + a signal. | Map it to 400 in the exception handler. |
-
+| M6 | **[FIXED 2026-09-09]** ~~`sort` param → 500~~ on the catalogues (`?sort=(select 1)`). *Not* SQLi — Spring Data validates the property before building SQL. It was an unhandled `PropertyReferenceException` = log-spam DoS + a signal. | `catalogue-common/ApiExceptionHandler` maps `PropertyReferenceException` to **400**. |
 ---
 
 ## 🟢 Low / informational

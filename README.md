@@ -87,8 +87,16 @@ Flyway migrations: `V1` schema + tags, `V2` nutrition columns + reference table,
 
 ## Security
 
-No Spring Security on the classpath — **every write is unauthenticated**. See
-`SECURITY.md` (finding C2). Do not expose `:8082` outside a trusted host.
+Reads are open; every write (`POST` / `PUT` / `DELETE` / `PATCH` under `/api/**`)
+needs a valid HMAC `X-Internal-Auth` header from an internal caller — the shared
+`catalogue-common` `InternalAuthFilter` (finding C2, fixed 2026-09-09). The
+secret (`INTERNAL_AUTH_SECRET`) still has a **public dev default** (finding N1):
+set a real one before exposing `:8082`. See `SECURITY.md`.
+
+**Limits** (finding N4): ≤ 50 tags per request, each ≤ 100 chars (enforced in the
+shared `TagService.resolve`, so the CSV importer can't bypass it); tag-merge
+sources ≤ 50; CSV import ≤ 5 000 rows and ≤ 100 fields per row (`Csv.parse`).
+Over a limit → 400 (or, for a CSV row, that row is reported and skipped).
 
 ## Status
 
